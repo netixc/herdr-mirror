@@ -343,8 +343,9 @@ pub struct ConvergeDeps {
     pub closes: crate::closes::Closes,
 }
 
-/// argv for one mirror pane: this same binary in `pane` mode. Panes without a
-/// known size get no --cols/--rows (the wrapper falls back to a default).
+/// argv for one mirror pane: this same binary in `pane` mode. Watch-only panes
+/// with a known remote size get a fixed, margin-padded Observe request; drive
+/// panes omit it so Control follows the local pane dimensions.
 pub(crate) fn cmd_for_pane(
     host: &HostConfig,
     state_dir: &std::path::Path,
