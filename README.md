@@ -38,7 +38,7 @@ A remote can be another machine over **ssh**, or a **container** on this one
 ## Installation
 
 ```bash
-herdr plugin install nikok6/herdr-mirror     # or: herdr plugin link <path>
+herdr plugin install netixc/herdr-mirror     # or: herdr plugin link <path>
 herdr server reload-config                   # load the plugin (actions + autostart hook)
 ```
 
@@ -322,6 +322,19 @@ rows = [["state_icon", "workspace"], ["state_text", "agent"], ["$rcwd"]]
   never move a byte) fall back automatically to an exec relay — see
   `api_transport` above. The remote needs `socat` or `python3` for that path;
   almost everything has one or the other.
+
+## Manual sizing check
+
+For a live smoke test of pane sizing:
+
+1. Configure a headless host with `always_control = true`, start the mirror, and
+   focus a mirrored pane. Its streamed content should reach the local pane's
+   edges rather than stopping at the remote layout's smaller rectangle.
+2. Resize the local Herdr client in both directions and confirm the stream and
+   remote PTY follow the new local dimensions.
+3. Set `always_control = false` for a remote with its own display. Resizing the
+   local mirror must leave that remote display unchanged; typing should still
+   take control only through the documented watch-only escalation.
 
 ## License
 

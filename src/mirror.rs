@@ -277,8 +277,9 @@ fn clamp_status(s: &str) -> String {
     s.chars().take(CUSTOM_STATUS_MAX).collect()
 }
 
-// Observe requests = the remote pane's real size + a margin that absorbs
-// modest remote resizes (a larger resize clips until the wrapper reconnects).
+// Watch-only observe requests = the remote pane's real size + a margin that
+// absorbs modest remote resizes (a larger resize clips until the wrapper
+// reconnects). Drive sessions use the local pane size in Control instead.
 const OBSERVE_MARGIN_COLS: u32 = 16;
 const OBSERVE_MARGIN_ROWS: u32 = 8;
 
@@ -390,13 +391,23 @@ pub(crate) fn cmd_for_pane(
                 argv.extend(["--docker-bin".into(), docker_bin.clone()]);
             }
         }
-        if let Some(rect) = sizes.get(pane_id) {
-            argv.extend([
-                "--cols".into(),
-                (rect.width + OBSERVE_MARGIN_COLS).to_string(),
-                "--rows".into(),
-                (rect.height + OBSERVE_MARGIN_ROWS).to_string(),
-            ]);
+        // A Control session gets its dimensions from the local pane at connect
+        // time (and from terminal.resize on later SIGWINCH events). Passing the
+        // remote layout here marks the wrapper's observe size as fixed, so an
+        // always-control pane that starts in the safe Observe fallback can stay
+        // trapped at the remote's small, headless layout instead of promoting
+        // cleanly to the local viewport. Keep the remote-sized observe request
+        // for watch-only hosts: observe never resizes the remote, and the margin
+        // prevents clipping after modest remote-side resizes.
+        if !always_control {
+            if let Some(rect) = sizes.get(pane_id) {
+                argv.extend([
+                    "--cols".into(),
+                    (rect.width + OBSERVE_MARGIN_COLS).to_string(),
+                    "--rows".into(),
+                    (rect.height + OBSERVE_MARGIN_ROWS).to_string(),
+                ]);
+            }
         }
         argv
     }
@@ -1566,6 +1577,58 @@ mod tests {
         );
         // argv[0] is the resolved exe path, which varies by install
         assert!(argv[0].ends_with("herdr-mirror") || argv[0].contains("herdr_mirror"), "{}", argv[0]);
+    }
+
+    #[test]
+    fn always_control_pane_argv_does_not_pin_remote_layout() {
+        let state_dir = std::path::Path::new("/state");
+        let mut sizes = HashMap::new();
+        sizes.insert("w1:p1".into(), LayoutRect { width: 56, height: 23 });
+        let cmd = cmd_for_pane(&ssh_host(), state_dir, &sizes);
+        let argv = cmd("w1:p1");
+        assert_eq!(
+            argv[1..],
+            [
+                "pane",
+                "vps",
+                "w1:p1",
+                "--remote-bin",
+                "~/.local/bin/herdr",
+                "--always-control",
+                "--ctl-path",
+                "/state/vps.ctl",
+            ]
+        );
+    }
+
+    #[test]
+    fn watch_only_pane_argv_keeps_remote_observe_margin() {
+        let mut host = ssh_host();
+        host.always_control = false;
+        let mut sizes = HashMap::new();
+        sizes.insert("w1:p1".into(), LayoutRect { width: 56, height: 23 });
+        let cmd = cmd_for_pane(&host, std::path::Path::new("/state"), &sizes);
+        let argv = cmd("w1:p1");
+        assert_eq!(
+            argv[1..],
+            [
+                "pane",
+                "vps",
+                "w1:p1",
+                "--remote-bin",
+                "~/.local/bin/herdr",
+                "--ctl-path",
+                "/state/vps.ctl",
+                "--cols",
+                "72",
+                "--rows",
+                "31",
+            ]
+        );
+        let parsed = crate::pane::parse_args(&argv[2..]).expect("watch-only argv must parse");
+        assert!(!parsed.always_control);
+        assert!(parsed.size_fixed);
+        assert_eq!((parsed.cols, parsed.rows), (72, 31));
     }
 
     /// Docker hosts append their flags *after* the ssh-shaped prefix, so the
