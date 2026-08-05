@@ -244,8 +244,21 @@ impl Renderer {
             let is_status_row = r == out_rows - 1 && !self.status_text.is_empty();
             let painted = if is_status_row {
                 format!("\x1b[0;7m {} \x1b[0m\x1b[K", self.status_text)
-            } else {
+            } else if limit < out_cols {
+                // EL clears stale cells when the streamed grid is narrower than
+                // the local pane. Do not emit it after a full-width line: after
+                // printing the rightmost cell the terminal is wrap-pending with
+                // its cursor still on that cell, so EL erases the cell we just
+                // painted. In a nested Herdr pane that showed up as a persistent
+                // one-column strip and clipped the last character of footers.
                 format!("{line}\x1b[0m\x1b[K")
+            } else {
+                // Clear before, not after, painting a full-width row. The
+                // pre-clear removes a stale right-margin cell when this frame's
+                // last cell is blank; a trailing EL would instead run while the
+                // cursor is wrap-pending and erase a non-blank last cell we just
+                // painted.
+                format!("\x1b[2K{line}\x1b[0m")
             };
             if self.last_rows.get(r).map(|p| p.as_deref()) != Some(Some(painted.as_str())) {
                 let _ = write!(out, "\x1b[{};1H", r + 1);
@@ -370,6 +383,53 @@ mod tests {
         r.status("reconnecting in 5s");
         let out = r.paint(&g, 80, 24);
         assert!(out.contains("reconnecting in 5s"));
+    }
+
+    #[test]
+    fn full_width_row_does_not_erase_its_last_cell() {
+        let mut g = Grid::new();
+        g.resize(4, 1);
+        g.apply("\x1b[1;1Habcd\x1b[?25l");
+        let mut r = Renderer::new();
+
+        let out = r.paint(&g, 4, 1);
+
+        // A terminal remains wrap-pending on column 4 after printing `d`.
+        // CSI K at that point erases the current cell as well as everything to
+        // its right, which is how nested mirror output used to lose `d`.
+        assert!(out.contains("\x1b[2K\x1b[0mabcd\x1b[0m\x1b[?2026l"), "got: {out:?}");
+        assert!(!out.contains("abcd\x1b[0m\x1b[K"), "got: {out:?}");
+    }
+
+    #[test]
+    fn full_width_row_preclears_a_stale_last_cell_before_painting_blank() {
+        let mut g = Grid::new();
+        g.resize(4, 1);
+        g.apply("\x1b[1;1Habcd\x1b[?25l");
+        let mut r = Renderer::new();
+        let _ = r.paint(&g, 4, 1);
+
+        // The next streamed delta makes the rightmost cell blank. Clear the
+        // old row before repainting so the local pane model cannot retain `d`.
+        g.apply("\x1b[1;4H ");
+        let out = r.paint(&g, 4, 1);
+
+        let clear = out.find("\x1b[2K").expect("full-width row must be pre-cleared");
+        let repaint = out.find("abc ").expect("blank last cell must be repainted");
+        assert!(clear < repaint, "stale cell was cleared too late: {out:?}");
+        assert!(!out.contains("abc \x1b[0m\x1b[K"), "got: {out:?}");
+    }
+
+    #[test]
+    fn narrow_grid_still_clears_the_rest_of_the_local_row() {
+        let mut g = Grid::new();
+        g.resize(3, 1);
+        g.apply("\x1b[1;1Habc");
+        let mut r = Renderer::new();
+
+        let out = r.paint(&g, 4, 1);
+
+        assert!(out.contains("abc\x1b[0m\x1b[K"), "got: {out:?}");
     }
 
     #[test]
