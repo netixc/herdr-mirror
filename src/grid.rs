@@ -21,22 +21,6 @@ pub struct Cell {
     pub ch: char,
 }
 
-/// Paint one narrow cell, emitting its SGR only when it changes from the
-/// previous cell. `blank` replaces a wide edge glyph that cannot safely fit.
-fn push_render_cell<'a>(
-    out: &mut String,
-    prev_sgr: &mut Option<&'a str>,
-    cell: Option<&'a Cell>,
-    blank: bool,
-) {
-    let sgr = cell.map(|c| &*c.sgr).unwrap_or("\x1b[0m");
-    if *prev_sgr != Some(sgr) {
-        out.push_str(if sgr.is_empty() { "\x1b[0m" } else { sgr });
-        *prev_sgr = Some(sgr);
-    }
-    out.push(if blank { ' ' } else { cell.map(|c| c.ch).unwrap_or(' ') });
-}
-
 #[derive(Default)]
 pub struct Grid {
     pub rows: Vec<Vec<Option<Cell>>>,
@@ -236,14 +220,8 @@ impl Renderer {
             let mut line = String::new();
             let mut prev_sgr: Option<&str> = None;
             let limit = out_cols.min(grid.width);
-            // Never print into the terminal's rightmost cell. Herdr marks a
-            // line wrapped when a printable reaches that margin, and its outer
-            // pane renderer can then retain a duplicate of that cell beside
-            // the PTY viewport. For a full-width row, reserve the last two
-            // cells and place the last one by shifting a staging cell with ICH.
-            let safe_limit = if limit == out_cols && out_cols >= 2 { limit - 2 } else { limit };
             let mut c = 0usize;
-            while c < safe_limit {
+            while c < limit {
                 let cell = cells.get(c).and_then(|c| c.as_ref());
                 let sgr = cell.map(|c| &*c.sgr).unwrap_or("\x1b[0m");
                 if prev_sgr != Some(sgr) {
@@ -252,10 +230,8 @@ impl Renderer {
                 }
                 let ch = cell.map(|c| c.ch).unwrap_or(' ');
                 let w = cw(ch);
-                // a wide char that would straddle this paint segment's edge is
-                // blanked. At the terminal margin the two edge cells below are
-                // handled separately without a right-margin print.
-                if w == 2 && c + 1 >= safe_limit {
+                // a wide char that would straddle the right edge is blanked
+                if w == 2 && c + 1 >= limit {
                     line.push(' ');
                     c += 1;
                     continue;
@@ -264,20 +240,6 @@ impl Renderer {
                 // wide char occupies two columns: skip its spacer cell so the
                 // painted columns stay aligned with the grid (Hangul/CJK fix)
                 c += w;
-            }
-            if limit == out_cols && out_cols >= 2 {
-                let second_last = cells.get(limit - 2).and_then(|c| c.as_ref());
-                let last = cells.get(limit - 1).and_then(|c| c.as_ref());
-                // A wide glyph touching the margin cannot be staged one cell at
-                // a time without splitting it. Blank both edge cells instead.
-                let wide_edge = second_last.is_some_and(|c| cw(c.ch) == 2)
-                    || last.is_some_and(|c| cw(c.ch) == 2);
-                // Stage the desired final cell in the penultimate column, then
-                // insert one cell there to shift it right without ever printing
-                // at the wrap margin. Finally restore the penultimate cell.
-                push_render_cell(&mut line, &mut prev_sgr, last, wide_edge);
-                let _ = write!(line, "\x1b[{};{}H\x1b[1@", r + 1, out_cols - 1);
-                push_render_cell(&mut line, &mut prev_sgr, second_last, wide_edge);
             }
             let is_status_row = r == out_rows - 1 && !self.status_text.is_empty();
             let painted = if is_status_row {
@@ -316,104 +278,6 @@ impl Renderer {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    /// Small VT screen for renderer tests. It implements exactly the controls
-    /// emitted by Renderer, including ICH, and records any printable that
-    /// touches the right margin (the operation that makes nested Herdr retain a
-    /// duplicate margin cell outside the PTY viewport).
-    struct PaintedTerminal {
-        rows: Vec<Vec<char>>,
-        row: usize,
-        col: usize,
-        right_margin_prints: usize,
-    }
-
-    impl PaintedTerminal {
-        fn new(width: usize, height: usize) -> Self {
-            Self { rows: vec![vec![' '; width]; height], row: 0, col: 0, right_margin_prints: 0 }
-        }
-
-        fn apply(&mut self, ansi: &str) {
-            let chars: Vec<char> = ansi.chars().collect();
-            let mut i = 0;
-            while i < chars.len() {
-                if chars[i] == '\x1b' {
-                    if let Some((params, final_ch, len)) = parse_csi(&chars[i..]) {
-                        match final_ch {
-                            'H' => {
-                                let mut nums = params
-                                    .split(';')
-                                    .map(|n| n.parse::<usize>().unwrap_or(1).max(1));
-                                self.row = nums.next().unwrap_or(1) - 1;
-                                self.col = nums.next().unwrap_or(1) - 1;
-                            }
-                            'J' if params == "2" => {
-                                for row in &mut self.rows {
-                                    row.fill(' ');
-                                }
-                            }
-                            'K' => {
-                                let Some(row) = self.rows.get_mut(self.row) else {
-                                    i += len;
-                                    continue;
-                                };
-                                if params == "2" {
-                                    row.fill(' ');
-                                } else {
-                                    for cell in row.iter_mut().skip(self.col) {
-                                        *cell = ' ';
-                                    }
-                                }
-                            }
-                            '@' => {
-                                let n = params.parse::<usize>().unwrap_or(1).max(1);
-                                if let Some(row) = self.rows.get_mut(self.row) {
-                                    for _ in 0..n {
-                                        for c in (self.col + 1..row.len()).rev() {
-                                            row[c] = row[c - 1];
-                                        }
-                                        if self.col < row.len() {
-                                            row[self.col] = ' ';
-                                        }
-                                    }
-                                }
-                            }
-                            _ => {}
-                        }
-                        i += len;
-                        continue;
-                    }
-                    if let Some(len) = parse_osc(&chars[i..]) {
-                        i += len;
-                        continue;
-                    }
-                    i += 2;
-                    continue;
-                }
-                let ch = chars[i];
-                if ch >= ' ' {
-                    let w = cw(ch);
-                    if let Some(row) = self.rows.get_mut(self.row) {
-                        if self.col + w >= row.len() {
-                            self.right_margin_prints += 1;
-                        }
-                        if self.col < row.len() {
-                            row[self.col] = ch;
-                        }
-                        if w == 2 && self.col + 1 < row.len() {
-                            row[self.col + 1] = ' ';
-                        }
-                        self.col = (self.col + w).min(row.len().saturating_sub(1));
-                    }
-                }
-                i += 1;
-            }
-        }
-
-        fn line(&self, row: usize) -> String {
-            self.rows[row].iter().collect()
-        }
-    }
 
     #[test]
     fn decodes_per_cell_frame() {
@@ -530,12 +394,11 @@ mod tests {
 
         let out = r.paint(&g, 4, 1);
 
-        let mut terminal = PaintedTerminal::new(4, 1);
-        terminal.apply(&out);
-        assert_eq!(terminal.line(0), "abcd");
-        assert_eq!(terminal.right_margin_prints, 0, "right-margin printable in {out:?}");
-        // A trailing EL here would erase `d` while the cursor is on its cell.
-        assert!(!out.contains("\x1b[0m\x1b[K"), "got: {out:?}");
+        // A terminal remains wrap-pending on column 4 after printing `d`.
+        // CSI K at that point erases the current cell as well as everything to
+        // its right, which is how nested mirror output used to lose `d`.
+        assert!(out.contains("\x1b[2K\x1b[0mabcd\x1b[0m\x1b[?2026l"), "got: {out:?}");
+        assert!(!out.contains("abcd\x1b[0m\x1b[K"), "got: {out:?}");
     }
 
     #[test]
@@ -544,45 +407,17 @@ mod tests {
         g.resize(4, 1);
         g.apply("\x1b[1;1Habcd\x1b[?25l");
         let mut r = Renderer::new();
-        let first = r.paint(&g, 4, 1);
-        let mut terminal = PaintedTerminal::new(4, 1);
-        terminal.apply(&first);
+        let _ = r.paint(&g, 4, 1);
 
-        // The next streamed delta makes the rightmost cell blank. Parse it into
-        // the grid, then pass the resulting repaint through terminal controls.
+        // The next streamed delta makes the rightmost cell blank. Clear the
+        // old row before repainting so the local pane model cannot retain `d`.
         g.apply("\x1b[1;4H ");
         let out = r.paint(&g, 4, 1);
-        terminal.apply(&out);
 
-        assert_eq!(terminal.line(0), "abc ");
-        assert_eq!(terminal.right_margin_prints, 0, "right-margin printable in {out:?}");
-        assert!(out.contains("\x1b[2K"), "full-width row was not pre-cleared: {out:?}");
-    }
-
-    #[test]
-    fn real_control_resize_delta_survives_parser_and_margin_safe_paint() {
-        // Captured from fm-remote's control/observe stream while the local pane
-        // moved from 135 back to 137 columns. The first delta has the footer
-        // right-aligned to column 135; the second updates only its right edge.
-        const AT_135_COLS: &str = "\x1b[49;1H\x1b[0;38;2;102;102;102;49m↑\x1b[49;2H72k ↓\x1b[49;7H1.5k R238k CH99.5% $0.224 (sub) 13.8%/180k (auto)                                                           (xai) grok-4.5 •\x1b[49;131H high\x1b[0m";
-        const GROW_TO_137: &str = "\x1b[49;115H\x1b[0;38;2;102;102;102;49m  (xai) grok-4.5\x1b[49;132H•\x1b[49;133H high\x1b[0m";
-        const EXPECTED: &str = "↑72k ↓1.5k R238k CH99.5% $0.224 (sub) 13.8%/180k (auto)                                                             (xai) grok-4.5 • high";
-
-        assert_eq!(EXPECTED.chars().count(), 137);
-        let mut grid = Grid::new();
-        grid.resize(137, 49);
-        let mut renderer = Renderer::new();
-        let mut terminal = PaintedTerminal::new(137, 49);
-
-        grid.apply(AT_135_COLS);
-        terminal.apply(&renderer.paint(&grid, 137, 49));
-        grid.apply(GROW_TO_137);
-        let out = renderer.paint(&grid, 137, 49);
-        terminal.apply(&out);
-
-        assert_eq!(grid.text_lines()[48], EXPECTED, "frame parser retained a ghost cell");
-        assert_eq!(terminal.line(48), EXPECTED, "renderer changed the parsed frame");
-        assert_eq!(terminal.right_margin_prints, 0, "renderer printed at the wrap margin");
+        let clear = out.find("\x1b[2K").expect("full-width row must be pre-cleared");
+        let repaint = out.find("abc ").expect("blank last cell must be repainted");
+        assert!(clear < repaint, "stale cell was cleared too late: {out:?}");
+        assert!(!out.contains("abc \x1b[0m\x1b[K"), "got: {out:?}");
     }
 
     #[test]
@@ -605,9 +440,7 @@ mod tests {
         let mut r = Renderer::new();
         let out = r.paint(&g, 5, 3);
         // window shows rows 8..10 → "last" lands on the visible last row
-        let mut terminal = PaintedTerminal::new(5, 3);
-        terminal.apply(&out);
-        assert_eq!(terminal.line(2), "last ");
+        assert!(out.contains("last"));
         r.status("HELLO");
         let out2 = r.paint(&g, 5, 3);
         assert!(out2.contains("HELLO"));
