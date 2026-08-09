@@ -101,7 +101,10 @@ pub fn load_state(state_dir: &Path, host: &str) -> HostState {
 
 pub fn save_state(state_dir: &Path, host: &str, state: &HostState) -> Result<()> {
     std::fs::create_dir_all(state_dir)?;
-    std::fs::write(state_path(state_dir, host), serde_json::to_string_pretty(state)?)?;
+    std::fs::write(
+        state_path(state_dir, host),
+        serde_json::to_string_pretty(state)?,
+    )?;
     Ok(())
 }
 
@@ -125,7 +128,10 @@ mod tests {
 }"#;
         let state: HostState = serde_json::from_str(ts).unwrap();
         assert_eq!(state.workspaces["w9"].local_id, "w1234");
-        assert_eq!(state.workspaces["w9"].root_tab_local_id.as_deref(), Some("t99"));
+        assert_eq!(
+            state.workspaces["w9"].root_tab_local_id.as_deref(),
+            Some("t99")
+        );
         assert!(state.workspaces["wB"].is_tombstoned());
         // a tab mapped before label history existed loads with none, which the
         // resolver reads as "remote wins once"

@@ -114,7 +114,15 @@ fn attach_point(
         return None;
     }
     for (depth, (split, went_second)) in chain.iter().enumerate().rev() {
-        let LayoutNode::Split { direction, ratio, first, second } = split else { continue };
+        let LayoutNode::Split {
+            direction,
+            ratio,
+            first,
+            second,
+        } = split
+        else {
+            continue;
+        };
         let other = if *went_second { first } else { second };
         let neighbours = mirrored_in(other, mirrored);
         match neighbours.len() {
@@ -181,7 +189,9 @@ pub fn plan_placements(
             .min();
         let Some((_, i)) = next else { break };
         let pane = pending.remove(i);
-        let Some(Ok((placement, _))) = attach_point(remote, &pane, &placed) else { continue };
+        let Some(Ok((placement, _))) = attach_point(remote, &pane, &placed) else {
+            continue;
+        };
         out.push(placement);
         placed.insert(pane);
     }
@@ -249,7 +259,16 @@ pub fn plan_sync(
     let mut plan = SyncPlan::default();
     // (pane sitting here, pane that should sit here), in traversal order
     let mut seats: Vec<(String, String)> = Vec::new();
-    walk(remote, local, &mut Vec::new(), map, base, local_wins, &mut plan, &mut seats);
+    walk(
+        remote,
+        local,
+        &mut Vec::new(),
+        map,
+        base,
+        local_wins,
+        &mut plan,
+        &mut seats,
+    );
     if !plan.structural_mismatch {
         plan.swaps = plan_swaps(seats);
     }
@@ -291,7 +310,11 @@ fn walk(
             let key = path_key(path);
             let agreed = decide(*rratio, *lratio, base.get(&key).copied(), local_wins);
             if let Some(side) = agreed.apply {
-                plan.ratios.push(RatioFix { path: path.clone(), ratio: agreed.ratio, apply_to: side });
+                plan.ratios.push(RatioFix {
+                    path: path.clone(),
+                    ratio: agreed.ratio,
+                    apply_to: side,
+                });
             }
             plan.base.insert(key, agreed.ratio);
 
@@ -327,22 +350,40 @@ struct Decision {
 /// Three-way merge of one split's ratio.
 fn decide(remote: f64, local: f64, base: Option<f64>, local_wins: bool) -> Decision {
     if ratios_equal(remote, local) {
-        return Decision { ratio: remote, apply: None };
+        return Decision {
+            ratio: remote,
+            apply: None,
+        };
     }
     let Some(base) = base else {
         // never synced: adopt the remote's geometry, which is the mirror's
         // starting point in either mode
-        return Decision { ratio: remote, apply: Some(Side::Local) };
+        return Decision {
+            ratio: remote,
+            apply: Some(Side::Local),
+        };
     };
     let local_moved = !ratios_equal(local, base);
     let remote_moved = !ratios_equal(remote, base);
     match (remote_moved, local_moved) {
-        (true, false) => Decision { ratio: remote, apply: Some(Side::Local) },
-        (false, true) => Decision { ratio: local, apply: Some(Side::Remote) },
+        (true, false) => Decision {
+            ratio: remote,
+            apply: Some(Side::Local),
+        },
+        (false, true) => Decision {
+            ratio: local,
+            apply: Some(Side::Remote),
+        },
         // both moved since the last agreement, or neither did while the sides
         // still differ (a write we never saw land): the configured owner wins
-        _ if local_wins => Decision { ratio: local, apply: Some(Side::Remote) },
-        _ => Decision { ratio: remote, apply: Some(Side::Local) },
+        _ if local_wins => Decision {
+            ratio: local,
+            apply: Some(Side::Remote),
+        },
+        _ => Decision {
+            ratio: remote,
+            apply: Some(Side::Local),
+        },
     }
 }
 
@@ -373,7 +414,10 @@ mod tests {
     use super::*;
 
     fn leaf(id: &str) -> LayoutNode {
-        LayoutNode::Pane { pane_id: Some(id.into()), label: None }
+        LayoutNode::Pane {
+            pane_id: Some(id.into()),
+            label: None,
+        }
     }
 
     fn split(direction: &str, ratio: f64, first: LayoutNode, second: LayoutNode) -> LayoutNode {
@@ -390,7 +434,10 @@ mod tests {
     }
 
     fn map(pairs: &[(&str, &str)]) -> BTreeMap<String, String> {
-        pairs.iter().map(|(r, l)| (r.to_string(), l.to_string())).collect()
+        pairs
+            .iter()
+            .map(|(r, l)| (r.to_string(), l.to_string()))
+            .collect()
     }
 
     fn base(pairs: &[(&str, f64)]) -> BTreeMap<String, f64> {
@@ -445,13 +492,24 @@ mod tests {
     fn orders_a_burst_so_nesting_is_reproduced() {
         // p1 | (p2 / p3), with only p1 mirrored: p2 must be placed before p3,
         // and p3 against p2 — not against p1
-        let remote = split("right", 0.5, leaf("p1"), split("down", 0.4, leaf("p2"), leaf("p3")));
+        let remote = split(
+            "right",
+            0.5,
+            leaf("p1"),
+            split("down", 0.4, leaf("p2"), leaf("p3")),
+        );
         let (places, stuck) = plan_placements(&remote, &mirrored(&["p1"]));
         assert!(stuck.is_empty());
         assert_eq!(places.len(), 2);
-        assert_eq!((places[0].pane.as_str(), places[0].target.as_str()), ("p2", "p1"));
+        assert_eq!(
+            (places[0].pane.as_str(), places[0].target.as_str()),
+            ("p2", "p1")
+        );
         assert_eq!(places[0].ratio, 0.5);
-        assert_eq!((places[1].pane.as_str(), places[1].target.as_str()), ("p3", "p2"));
+        assert_eq!(
+            (places[1].pane.as_str(), places[1].target.as_str()),
+            ("p3", "p2")
+        );
         assert_eq!(places[1].direction, "down");
         assert_eq!(places[1].ratio, 0.4);
     }
@@ -471,7 +529,15 @@ mod tests {
         assert!(stuck.is_empty(), "stranded {stuck:?}");
         let steps: Vec<(&str, &str, &str, f64, bool)> = places
             .iter()
-            .map(|p| (p.pane.as_str(), p.target.as_str(), p.direction.as_str(), p.ratio, p.swap))
+            .map(|p| {
+                (
+                    p.pane.as_str(),
+                    p.target.as_str(),
+                    p.direction.as_str(),
+                    p.ratio,
+                    p.swap,
+                )
+            })
             .collect();
         assert_eq!(
             steps,
@@ -490,7 +556,12 @@ mod tests {
     #[test]
     fn reports_panes_it_cannot_place_faithfully() {
         // (p1|p2) | p3 with p1,p2 mirrored: p3's sibling is the (p1|p2) subtree
-        let remote = split("right", 0.6, split("down", 0.5, leaf("p1"), leaf("p2")), leaf("p3"));
+        let remote = split(
+            "right",
+            0.6,
+            split("down", 0.5, leaf("p1"), leaf("p2")),
+            leaf("p3"),
+        );
         let (places, stuck) = plan_placements(&remote, &mirrored(&["p1", "p2"]));
         assert!(places.is_empty());
         assert_eq!(stuck, vec!["p3".to_string()]);
@@ -514,7 +585,11 @@ mod tests {
             let plan = plan_sync(&remote, &local, &m, &BTreeMap::new(), local_wins);
             assert_eq!(
                 plan.ratios,
-                vec![RatioFix { path: vec![], ratio: 0.3, apply_to: Side::Local }]
+                vec![RatioFix {
+                    path: vec![],
+                    ratio: 0.3,
+                    apply_to: Side::Local
+                }]
             );
             assert_eq!(plan.base.get(""), Some(&0.3));
             assert!(plan.swaps.is_empty() && !plan.structural_mismatch);
@@ -534,7 +609,14 @@ mod tests {
             &base(&[("", 0.5)]),
             true,
         );
-        assert_eq!(plan.ratios, vec![RatioFix { path: vec![], ratio: 0.3, apply_to: Side::Local }]);
+        assert_eq!(
+            plan.ratios,
+            vec![RatioFix {
+                path: vec![],
+                ratio: 0.3,
+                apply_to: Side::Local
+            }]
+        );
     }
 
     /// The mirror was resized since the last agreement: the REMOTE follows.
@@ -551,7 +633,14 @@ mod tests {
             &base(&[("", 0.5)]),
             false, // even a watch-only host: nobody else moved it
         );
-        assert_eq!(plan.ratios, vec![RatioFix { path: vec![], ratio: 0.7, apply_to: Side::Remote }]);
+        assert_eq!(
+            plan.ratios,
+            vec![RatioFix {
+                path: vec![],
+                ratio: 0.7,
+                apply_to: Side::Remote
+            }]
+        );
         assert_eq!(plan.base.get(""), Some(&0.7));
     }
 
@@ -566,18 +655,42 @@ mod tests {
         let b = base(&[("", 0.5)]);
 
         let drive = plan_sync(&remote, &local, &m, &b, true);
-        assert_eq!(drive.ratios, vec![RatioFix { path: vec![], ratio: 0.7, apply_to: Side::Remote }]);
+        assert_eq!(
+            drive.ratios,
+            vec![RatioFix {
+                path: vec![],
+                ratio: 0.7,
+                apply_to: Side::Remote
+            }]
+        );
 
         let watch = plan_sync(&remote, &local, &m, &b, false);
-        assert_eq!(watch.ratios, vec![RatioFix { path: vec![], ratio: 0.4, apply_to: Side::Local }]);
+        assert_eq!(
+            watch.ratios,
+            vec![RatioFix {
+                path: vec![],
+                ratio: 0.4,
+                apply_to: Side::Local
+            }]
+        );
     }
 
     /// In sync: no writes, and the agreement is recorded so the next pass can
     /// still tell which side moved.
     #[test]
     fn agreement_records_a_base_without_writing() {
-        let remote = split("right", 0.3, leaf("p1"), split("down", 0.25, leaf("p2"), leaf("p3")));
-        let local = split("right", 0.3, leaf("l1"), split("down", 0.25, leaf("l2"), leaf("l3")));
+        let remote = split(
+            "right",
+            0.3,
+            leaf("p1"),
+            split("down", 0.25, leaf("p2"), leaf("p3")),
+        );
+        let local = split(
+            "right",
+            0.3,
+            leaf("l1"),
+            split("down", 0.25, leaf("l2"), leaf("l3")),
+        );
         let plan = plan_sync(
             &remote,
             &local,
@@ -596,8 +709,13 @@ mod tests {
     fn sub_epsilon_wobble_is_not_a_correction() {
         let remote = split("right", 0.45000002, leaf("p1"), leaf("p2"));
         let local = split("right", 0.45, leaf("l1"), leaf("l2"));
-        let plan =
-            plan_sync(&remote, &local, &map(&[("p1", "l1"), ("p2", "l2")]), &BTreeMap::new(), false);
+        let plan = plan_sync(
+            &remote,
+            &local,
+            &map(&[("p1", "l1"), ("p2", "l2")]),
+            &BTreeMap::new(),
+            false,
+        );
         assert!(plan.ratios.is_empty());
     }
 
@@ -609,13 +727,23 @@ mod tests {
             "right",
             0.5,
             leaf("p1"),
-            split("down", 0.7, leaf("p2"), split("right", 0.2, leaf("p3"), leaf("p4"))),
+            split(
+                "down",
+                0.7,
+                leaf("p2"),
+                split("right", 0.2, leaf("p3"), leaf("p4")),
+            ),
         );
         let local = split(
             "right",
             0.5,
             leaf("l1"),
-            split("down", 0.4, leaf("l2"), split("right", 0.2, leaf("l3"), leaf("l4"))),
+            split(
+                "down",
+                0.4,
+                leaf("l2"),
+                split("right", 0.2, leaf("l3"), leaf("l4")),
+            ),
         );
         let plan = plan_sync(
             &remote,
@@ -626,7 +754,11 @@ mod tests {
         );
         assert_eq!(
             plan.ratios,
-            vec![RatioFix { path: vec![true], ratio: 0.7, apply_to: Side::Local }]
+            vec![RatioFix {
+                path: vec![true],
+                ratio: 0.7,
+                apply_to: Side::Local
+            }]
         );
         assert_eq!(plan.base.get("TT"), Some(&0.2));
     }
@@ -638,8 +770,13 @@ mod tests {
     fn exchanged_panes_come_back_as_swaps() {
         let remote = split("right", 0.5, leaf("p2"), leaf("p1"));
         let local = split("right", 0.5, leaf("l1"), leaf("l2"));
-        let plan =
-            plan_sync(&remote, &local, &map(&[("p1", "l1"), ("p2", "l2")]), &BTreeMap::new(), false);
+        let plan = plan_sync(
+            &remote,
+            &local,
+            &map(&[("p1", "l1"), ("p2", "l2")]),
+            &BTreeMap::new(),
+            false,
+        );
         assert_eq!(plan.swaps, vec![("l1".to_string(), "l2".to_string())]);
         assert!(plan.ratios.is_empty() && !plan.structural_mismatch);
     }
@@ -648,8 +785,18 @@ mod tests {
     /// and no swap that undoes an earlier one.
     #[test]
     fn rotated_panes_decompose_into_minimal_swaps() {
-        let remote = split("right", 0.5, leaf("p2"), split("down", 0.5, leaf("p3"), leaf("p1")));
-        let local = split("right", 0.5, leaf("l1"), split("down", 0.5, leaf("l2"), leaf("l3")));
+        let remote = split(
+            "right",
+            0.5,
+            leaf("p2"),
+            split("down", 0.5, leaf("p3"), leaf("p1")),
+        );
+        let local = split(
+            "right",
+            0.5,
+            leaf("l1"),
+            split("down", 0.5, leaf("l2"), leaf("l3")),
+        );
         let plan = plan_sync(
             &remote,
             &local,
@@ -659,7 +806,10 @@ mod tests {
         );
         assert_eq!(
             plan.swaps,
-            vec![("l1".to_string(), "l2".to_string()), ("l1".to_string(), "l3".to_string())]
+            vec![
+                ("l1".to_string(), "l2".to_string()),
+                ("l1".to_string(), "l3".to_string())
+            ]
         );
     }
 
@@ -667,7 +817,12 @@ mod tests {
     /// a divergence resizes something unrelated.
     #[test]
     fn structural_mismatch_blocks_everything() {
-        let remote = split("right", 0.3, leaf("p1"), split("down", 0.5, leaf("p2"), leaf("p3")));
+        let remote = split(
+            "right",
+            0.3,
+            leaf("p1"),
+            split("down", 0.5, leaf("p2"), leaf("p3")),
+        );
         let local = split("right", 0.5, leaf("l1"), leaf("l2"));
         let plan = plan_sync(
             &remote,
@@ -686,8 +841,13 @@ mod tests {
     fn direction_mismatch_is_structural() {
         let remote = split("right", 0.3, leaf("p1"), leaf("p2"));
         let local = split("down", 0.5, leaf("l1"), leaf("l2"));
-        let plan =
-            plan_sync(&remote, &local, &map(&[("p1", "l1"), ("p2", "l2")]), &BTreeMap::new(), false);
+        let plan = plan_sync(
+            &remote,
+            &local,
+            &map(&[("p1", "l1"), ("p2", "l2")]),
+            &BTreeMap::new(),
+            false,
+        );
         assert!(plan.structural_mismatch);
         assert!(plan.ratios.is_empty());
     }
@@ -698,7 +858,13 @@ mod tests {
     fn unmirrored_pane_is_structural() {
         let remote = split("right", 0.3, leaf("p1"), leaf("p2"));
         let local = split("right", 0.5, leaf("l1"), leaf("l2"));
-        let plan = plan_sync(&remote, &local, &map(&[("p1", "l1")]), &BTreeMap::new(), false);
+        let plan = plan_sync(
+            &remote,
+            &local,
+            &map(&[("p1", "l1")]),
+            &BTreeMap::new(),
+            false,
+        );
         assert!(plan.structural_mismatch);
     }
 }

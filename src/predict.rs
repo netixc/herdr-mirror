@@ -70,13 +70,17 @@ pub struct Predictor {
 // marker file enables appending predictor events to ~/.local/state/herdr-mirror/predict.log
 fn dbg(msg: &str) {
     use std::io::Write as _;
-    let Some(home) = std::env::var_os("HOME") else { return };
+    let Some(home) = std::env::var_os("HOME") else {
+        return;
+    };
     let dir = std::path::Path::new(&home).join(".local/state/herdr-mirror");
     if !dir.join("predict-debug-on").exists() {
         return;
     }
-    if let Ok(mut f) =
-        std::fs::OpenOptions::new().create(true).append(true).open(dir.join("predict.log"))
+    if let Ok(mut f) = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(dir.join("predict.log"))
     {
         let _ = writeln!(f, "[{}] {}", std::process::id(), msg);
     }
@@ -144,7 +148,11 @@ impl Predictor {
                 }
             }
             EscState::OscEsc => {
-                self.esc = if b == b'\\' { EscState::Ground } else { EscState::Osc };
+                self.esc = if b == b'\\' {
+                    EscState::Ground
+                } else {
+                    EscState::Osc
+                };
             }
             EscState::Ground => return false,
         }
@@ -176,8 +184,16 @@ impl Predictor {
                         ));
                         continue; // off-grid (or pre-first-frame): don't predict
                     }
-                    dbg(&format!("push '{}' at ({row},{col}) streak={}", b as char, self.streak));
-                    self.pending.push(Pending { row, col, ch: b as char, at: Instant::now() });
+                    dbg(&format!(
+                        "push '{}' at ({row},{col}) streak={}",
+                        b as char, self.streak
+                    ));
+                    self.pending.push(Pending {
+                        row,
+                        col,
+                        ch: b as char,
+                        at: Instant::now(),
+                    });
                     changed = true;
                 }
                 0x7f | 0x08 => {
@@ -214,21 +230,36 @@ impl Predictor {
     pub fn on_frame(&mut self, grid: &Grid) {
         let now = Instant::now();
         while let Some(p) = self.pending.first() {
-            let cell =
-                grid.rows.get(p.row).and_then(|r| r.get(p.col)).and_then(|c| c.as_ref());
+            let cell = grid
+                .rows
+                .get(p.row)
+                .and_then(|r| r.get(p.col))
+                .and_then(|c| c.as_ref());
             if cell.map(|c| c.ch) == Some(p.ch) {
-                dbg(&format!("confirm '{}' at ({},{}) streak->{}", p.ch, p.row, p.col, self.streak + 1));
+                dbg(&format!(
+                    "confirm '{}' at ({},{}) streak->{}",
+                    p.ch,
+                    p.row,
+                    p.col,
+                    self.streak + 1
+                ));
                 self.pending.remove(0);
                 self.streak = (self.streak + 1).min(STREAK_CAP);
                 continue;
             }
-            let cursor_passed = grid.cursor_row > p.row
-                || (grid.cursor_row == p.row && grid.cursor_col > p.col);
+            let cursor_passed =
+                grid.cursor_row > p.row || (grid.cursor_row == p.row && grid.cursor_col > p.col);
             if (cursor_passed && cell.is_some()) || now.duration_since(p.at) > TIMEOUT {
                 dbg(&format!(
                     "BUST '{}' at ({},{}): cell={:?} cursor=({},{}) passed={} aged={:?}",
-                    p.ch, p.row, p.col, cell.map(|c| c.ch),
-                    grid.cursor_row, grid.cursor_col, cursor_passed, now.duration_since(p.at)
+                    p.ch,
+                    p.row,
+                    p.col,
+                    cell.map(|c| c.ch),
+                    grid.cursor_row,
+                    grid.cursor_col,
+                    cursor_passed,
+                    now.duration_since(p.at)
                 ));
                 self.bust();
             }
@@ -243,7 +274,11 @@ impl Predictor {
 
     /// Expire timed-out predictions (main-loop deadline arm).
     pub fn on_tick(&mut self) {
-        if self.pending.first().is_some_and(|p| p.at.elapsed() > TIMEOUT) {
+        if self
+            .pending
+            .first()
+            .is_some_and(|p| p.at.elapsed() > TIMEOUT)
+        {
             self.bust();
         }
     }

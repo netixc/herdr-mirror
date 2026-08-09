@@ -66,13 +66,15 @@ struct Resolved {
 fn resolve_context(env: &Env, hosts: &[HostConfig], ctx: &InvocationContext) -> Option<Resolved> {
     for host in hosts {
         let state = load_state(&env.state_dir, &host.name);
-        let ws_hit = state.workspaces.iter().find(|(_, e)| {
-            Some(&e.local_id) == ctx.workspace_id.as_ref() && !e.is_tombstoned()
-        });
+        let ws_hit = state
+            .workspaces
+            .iter()
+            .find(|(_, e)| Some(&e.local_id) == ctx.workspace_id.as_ref() && !e.is_tombstoned());
         let Some((ws_rid, _)) = ws_hit else { continue };
-        let pane_hit = state.panes.iter().find(|(_, e)| {
-            Some(&e.local_id) == ctx.focused_pane_id.as_ref() && !e.is_tombstoned()
-        });
+        let pane_hit = state
+            .panes
+            .iter()
+            .find(|(_, e)| Some(&e.local_id) == ctx.focused_pane_id.as_ref() && !e.is_tombstoned());
         return Some(Resolved {
             host: host.clone(),
             remote_ws_id: Some(ws_rid.clone()),
@@ -103,14 +105,16 @@ fn invocation_context() -> InvocationContext {
 /// cwd for a local fallback, inherited the way native new_tab/split do: shell
 /// bindings carry it directly, plugin actions don't, so fall back to the
 /// focused pane's cwd from the local snapshot.
-async fn local_cwd(
-    api: &crate::api::ApiClient,
-    ctx: &InvocationContext,
-) -> Result<Option<String>> {
-    if let Some(cwd) = std::env::var("HERDR_ACTIVE_PANE_CWD").ok().filter(|s| !s.is_empty()) {
+async fn local_cwd(api: &crate::api::ApiClient, ctx: &InvocationContext) -> Result<Option<String>> {
+    if let Some(cwd) = std::env::var("HERDR_ACTIVE_PANE_CWD")
+        .ok()
+        .filter(|s| !s.is_empty())
+    {
         return Ok(Some(cwd));
     }
-    let Some(pane_id) = &ctx.focused_pane_id else { return Ok(None) };
+    let Some(pane_id) = &ctx.focused_pane_id else {
+        return Ok(None);
+    };
     let snap = fetch_snapshot(api).await?;
     Ok(snap
         .panes
@@ -132,7 +136,9 @@ async fn local_tab(env: &Env, ctx: &InvocationContext) -> Result<()> {
     let res: Value = api.request("tab.create", params).await?;
     println!(
         "created local tab {}",
-        res.pointer("/tab/tab_id").and_then(|v| v.as_str()).unwrap_or("?")
+        res.pointer("/tab/tab_id")
+            .and_then(|v| v.as_str())
+            .unwrap_or("?")
     );
     Ok(())
 }
@@ -154,7 +160,9 @@ async fn local_split(env: &Env, ctx: &InvocationContext, direction: &str) -> Res
     println!(
         "split local pane {} {direction} → {}",
         ctx.focused_pane_id.as_deref().unwrap_or("focused"),
-        res.pointer("/pane/pane_id").and_then(|v| v.as_str()).unwrap_or("?")
+        res.pointer("/pane/pane_id")
+            .and_then(|v| v.as_str())
+            .unwrap_or("?")
     );
     Ok(())
 }
@@ -208,7 +216,10 @@ fn local_context_value(ctx: &InvocationContext) -> Value {
     if let Some(pane) = &ctx.focused_pane_id {
         out["focused_pane_id"] = json!(pane);
     }
-    if let Some(cwd) = std::env::var("HERDR_ACTIVE_PANE_CWD").ok().filter(|s| !s.is_empty()) {
+    if let Some(cwd) = std::env::var("HERDR_ACTIVE_PANE_CWD")
+        .ok()
+        .filter(|s| !s.is_empty())
+    {
         out["focused_pane_cwd"] = json!(cwd);
     }
     out
@@ -232,7 +243,10 @@ async fn invoke(env: &Env, spec: &str) -> Result<()> {
     let ctx = invocation_context();
     // Same deliberate non-`?` as run(): the local fallback needs no host config.
     let config = load_config(&env.config_search);
-    let resolved = config.as_ref().ok().and_then(|c| resolve_context(env, &c.hosts, &ctx));
+    let resolved = config
+        .as_ref()
+        .ok()
+        .and_then(|c| resolve_context(env, &c.hosts, &ctx));
 
     let Some(resolved) = resolved else {
         let api = crate::api::ApiClient::connect(&env.local_socket).await?;
@@ -293,8 +307,10 @@ async fn run(env: &Env, kind: &str, direction: Option<&str>) -> Result<()> {
     // Hard-failing here would kill that key for anyone who hasn't written
     // hosts.toml yet, with an error about SSH hosts they never asked for.
     let config = load_config(&env.config_search);
-    let resolved =
-        config.as_ref().ok().and_then(|c| resolve_context(env, &c.hosts, &ctx));
+    let resolved = config
+        .as_ref()
+        .ok()
+        .and_then(|c| resolve_context(env, &c.hosts, &ctx));
 
     // One key for both worlds: inside a mirror these take the remote path
     // below; anywhere else they degrade to the plain local action instead of
@@ -339,22 +355,36 @@ async fn run(env: &Env, kind: &str, direction: Option<&str>) -> Result<()> {
 
     match kind {
         "workspace" => {
-            let res: Value = api.request("workspace.create", json!({ "cwd": cwd, "focus": false })).await?;
+            let res: Value = api
+                .request("workspace.create", json!({ "cwd": cwd, "focus": false }))
+                .await?;
             println!(
                 "created workspace {} ({}) on {}; mirror follows shortly",
-                res.pointer("/workspace/label").and_then(|v| v.as_str()).unwrap_or("?"),
-                res.pointer("/workspace/workspace_id").and_then(|v| v.as_str()).unwrap_or("?"),
+                res.pointer("/workspace/label")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("?"),
+                res.pointer("/workspace/workspace_id")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("?"),
                 host.name
             );
         }
         "tab" => {
-            let ws = resolved.as_ref().and_then(|r| r.remote_ws_id.clone()).unwrap();
+            let ws = resolved
+                .as_ref()
+                .and_then(|r| r.remote_ws_id.clone())
+                .unwrap();
             let res: Value = api
-                .request("tab.create", json!({ "workspace_id": ws, "cwd": cwd, "focus": false }))
+                .request(
+                    "tab.create",
+                    json!({ "workspace_id": ws, "cwd": cwd, "focus": false }),
+                )
                 .await?;
             println!(
                 "created tab {} in {}: {ws}; mirror follows shortly",
-                res.pointer("/tab/tab_id").and_then(|v| v.as_str()).unwrap_or("?"),
+                res.pointer("/tab/tab_id")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("?"),
                 host.name
             );
         }
@@ -372,7 +402,9 @@ async fn run(env: &Env, kind: &str, direction: Option<&str>) -> Result<()> {
             println!(
                 "split {pane_id} {dir} on {} → {}; mirror follows shortly",
                 host.name,
-                res.pointer("/pane/pane_id").and_then(|v| v.as_str()).unwrap_or("ok")
+                res.pointer("/pane/pane_id")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("ok")
             );
         }
         _ => return Err(err(format!("unknown remote action: {kind}"))),

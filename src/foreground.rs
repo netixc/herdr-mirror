@@ -18,15 +18,39 @@ use crate::remote::SSH_COMMON_OPTS;
 /// Interactive shells: at a prompt these don't enable mouse reporting, so mouse
 /// events over them should stay local rather than being forwarded to the pty.
 const SHELLS: &[&str] = &[
-    "bash", "zsh", "fish", "sh", "dash", "ksh", "ksh93", "mksh", "ash", "tcsh",
-    "csh", "nu", "elvish", "xonsh", "osh", "ysh", "oil", "ion", "murex", "ngs",
-    "pwsh", "powershell", "cmd",
+    "bash",
+    "zsh",
+    "fish",
+    "sh",
+    "dash",
+    "ksh",
+    "ksh93",
+    "mksh",
+    "ash",
+    "tcsh",
+    "csh",
+    "nu",
+    "elvish",
+    "xonsh",
+    "osh",
+    "ysh",
+    "oil",
+    "ion",
+    "murex",
+    "ngs",
+    "pwsh",
+    "powershell",
+    "cmd",
 ];
 
 /// Is `name` one of the known interactive shells? Normalizes a login-shell dash
 /// (`-bash`), a leading path, and a Windows `.exe` suffix before matching.
 pub fn is_shell(name: &str) -> bool {
-    let base = name.trim_start_matches('-').rsplit(['/', '\\']).next().unwrap_or(name);
+    let base = name
+        .trim_start_matches('-')
+        .rsplit(['/', '\\'])
+        .next()
+        .unwrap_or(name);
     let n = base.trim_end_matches(".exe").to_ascii_lowercase();
     SHELLS.contains(&n.as_str())
 }
@@ -35,7 +59,11 @@ pub fn is_shell(name: &str) -> bool {
 /// shell, `Some(false)` = something else, `None` = indeterminate (empty/unparseable).
 pub fn classify(json: &str) -> Option<bool> {
     let v: serde_json::Value = serde_json::from_str(json).ok()?;
-    let fg = v.get("result")?.get("process_info")?.get("foreground_processes")?.as_array()?;
+    let fg = v
+        .get("result")?
+        .get("process_info")?
+        .get("foreground_processes")?
+        .as_array()?;
     // the last foreground process is the actually-running leaf, so `sudo vim`
     // classifies on `vim`, not `sudo`
     let name = fg.last()?.get("name")?.as_str()?;
@@ -63,7 +91,9 @@ pub async fn poll(
             //
             // No ControlMaster equivalent is needed — docker exec is local, so
             // there is no handshake to amortize.
-            let ids = crate::docker::resolve(&ct.docker_bin, &ct.kind).await.ok()?;
+            let ids = crate::docker::resolve(&ct.docker_bin, &ct.kind)
+                .await
+                .ok()?;
             let id = ids.into_iter().next()?;
             let mut c = Command::new(&ct.docker_bin);
             // `sh -c` not `-lc`: match ssh's non-login remote shell
@@ -119,14 +149,16 @@ mod tests {
         let tui = r#"{"result":{"process_info":{"foreground_processes":[{"name":"vim"}]}}}"#;
         assert_eq!(classify(tui), Some(false));
         // sudo wrapper: the leaf is the real program
-        let sudo =
-            r#"{"result":{"process_info":{"foreground_processes":[{"name":"sudo"},{"name":"vim"}]}}}"#;
+        let sudo = r#"{"result":{"process_info":{"foreground_processes":[{"name":"sudo"},{"name":"vim"}]}}}"#;
         assert_eq!(classify(sudo), Some(false));
     }
 
     #[test]
     fn classify_indeterminate_on_empty_or_garbage() {
-        assert_eq!(classify(r#"{"result":{"process_info":{"foreground_processes":[]}}}"#), None);
+        assert_eq!(
+            classify(r#"{"result":{"process_info":{"foreground_processes":[]}}}"#),
+            None
+        );
         assert_eq!(classify("not json"), None);
         assert_eq!(classify(r#"{"result":{}}"#), None);
     }

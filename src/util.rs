@@ -52,7 +52,11 @@ impl Env {
                 PathBuf::from(sock)
             }
         };
-        Ok(Env { config_search, state_dir, local_socket })
+        Ok(Env {
+            config_search,
+            state_dir,
+            local_socket,
+        })
     }
 }
 
@@ -88,7 +92,9 @@ pub fn cli_link_state() -> CliLink {
         Err(_) => CliLink::File,
         Ok(target) => {
             let resolved = fs::canonicalize(&link).ok();
-            let exe = std::env::current_exe().ok().and_then(|e| fs::canonicalize(e).ok());
+            let exe = std::env::current_exe()
+                .ok()
+                .and_then(|e| fs::canonicalize(e).ok());
             match resolved {
                 None => CliLink::Dangling(target),
                 Some(r) if exe.as_ref() == Some(&r) => CliLink::Ok(target),
@@ -104,9 +110,11 @@ pub fn cli_link_state() -> CliLink {
 pub fn cli_link_problem() -> Option<String> {
     match cli_link_state() {
         CliLink::Missing => Some(format!("{} is missing", cli_link_path().display())),
-        CliLink::Dangling(t) => {
-            Some(format!("{} dangles (-> {})", cli_link_path().display(), t.display()))
-        }
+        CliLink::Dangling(t) => Some(format!(
+            "{} dangles (-> {})",
+            cli_link_path().display(),
+            t.display()
+        )),
         _ => None,
     }
 }
@@ -164,12 +172,19 @@ pub struct Logger {
 
 impl Logger {
     pub fn new(state_dir: &Path, also_stdout: bool) -> Logger {
-        Logger { file: state_dir.join("daemon.log"), also_stdout }
+        Logger {
+            file: state_dir.join("daemon.log"),
+            also_stdout,
+        }
     }
 
     pub fn log(&self, msg: &str) {
         let line = format!("{} {}\n", now_iso(), msg);
-        if let Ok(mut f) = fs::OpenOptions::new().create(true).append(true).open(&self.file) {
+        if let Ok(mut f) = fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(&self.file)
+        {
             let _ = f.write_all(line.as_bytes());
         }
         if self.also_stdout {
@@ -232,7 +247,9 @@ pub fn streamer_pid_path(state_dir: &Path, ssh_target: &str, pane_target: &str) 
             .map(|c| if c.is_ascii_alphanumeric() { c } else { '_' })
             .collect::<String>()
     };
-    state_dir.join("streamer-pids").join(format!("{}--{}.pid", sane(ssh_target), sane(pane_target)))
+    state_dir
+        .join("streamer-pids")
+        .join(format!("{}--{}.pid", sane(ssh_target), sane(pane_target)))
 }
 
 pub fn streamer_alive(state_dir: &Path, ssh_target: &str, pane_target: &str) -> bool {

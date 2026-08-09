@@ -63,11 +63,29 @@ impl RelayCommand {
 /// Errors when neither exists — a clear "install one" beats a silent hang.
 pub async fn detect_relay_command(host: &RemoteHost, remote_sock: &str) -> Result<RelayCommand> {
     validate_socket_path(remote_sock)?;
-    if !host.exec("command -v socat", 8000).await.unwrap_or_default().trim().is_empty() {
-        return Ok(RelayCommand { cmd: socat_bridge_command(remote_sock), tool: "socat" });
+    if !host
+        .exec("command -v socat", 8000)
+        .await
+        .unwrap_or_default()
+        .trim()
+        .is_empty()
+    {
+        return Ok(RelayCommand {
+            cmd: socat_bridge_command(remote_sock),
+            tool: "socat",
+        });
     }
-    if !host.exec("command -v python3", 8000).await.unwrap_or_default().trim().is_empty() {
-        return Ok(RelayCommand { cmd: python_bridge_command(remote_sock), tool: "python3" });
+    if !host
+        .exec("command -v python3", 8000)
+        .await
+        .unwrap_or_default()
+        .trim()
+        .is_empty()
+    {
+        return Ok(RelayCommand {
+            cmd: python_bridge_command(remote_sock),
+            tool: "python3",
+        });
     }
     Err(err(
         "remote has neither socat nor python3, which one of is needed to reach herdr's \
@@ -176,7 +194,8 @@ impl ExecTarget {
             // if we drop the connection the child must die rather than linger
             // holding an exec channel open on the ControlMaster
             .kill_on_drop(true);
-        cmd.spawn().map_err(|e| err(format!("ssh exec (relay) failed: {e}")))
+        cmd.spawn()
+            .map_err(|e| err(format!("ssh exec (relay) failed: {e}")))
     }
 }
 
@@ -194,7 +213,11 @@ pub fn serve_relay(
     local_sock: PathBuf,
     log: Logger,
 ) -> Result<RelayHandle> {
-    let target = ExecTarget { ctl_path, ssh_target, relay_cmd };
+    let target = ExecTarget {
+        ctl_path,
+        ssh_target,
+        relay_cmd,
+    };
     let _ = std::fs::remove_file(&local_sock);
     if let Some(parent) = local_sock.parent() {
         let _ = std::fs::create_dir_all(parent);
@@ -205,7 +228,10 @@ pub fn serve_relay(
     // which can start agents with arbitrary argv. ssh's -L forward is 0600, so
     // match it rather than inheriting the ambient umask.
     if let Err(e) = std::fs::set_permissions(&local_sock, std::fs::Permissions::from_mode(0o600)) {
-        log.log(&format!("relay: cannot restrict {}: {e}", local_sock.display()));
+        log.log(&format!(
+            "relay: cannot restrict {}: {e}",
+            local_sock.display()
+        ));
     }
 
     let (shutdown_tx, shutdown_rx) = watch::channel(false);
@@ -241,7 +267,11 @@ pub fn serve_relay(
             });
         }
     });
-    Ok(RelayHandle { path, task, shutdown: shutdown_tx })
+    Ok(RelayHandle {
+        path,
+        task,
+        shutdown: shutdown_tx,
+    })
 }
 
 async fn wait_shutdown(mut rx: watch::Receiver<bool>) {
@@ -269,11 +299,24 @@ impl Drop for RelayHandle {
 }
 
 /// Copy bytes both ways until the remote side closes or we are shut down.
-async fn pump(target: &ExecTarget, stream: UnixStream, shutdown: watch::Receiver<bool>) -> Result<()> {
+async fn pump(
+    target: &ExecTarget,
+    stream: UnixStream,
+    shutdown: watch::Receiver<bool>,
+) -> Result<()> {
     let mut child = target.relay_child()?;
-    let mut cin = child.stdin.take().ok_or_else(|| err("relay: no child stdin"))?;
-    let mut cout = child.stdout.take().ok_or_else(|| err("relay: no child stdout"))?;
-    let mut cerr = child.stderr.take().ok_or_else(|| err("relay: no child stderr"))?;
+    let mut cin = child
+        .stdin
+        .take()
+        .ok_or_else(|| err("relay: no child stdin"))?;
+    let mut cout = child
+        .stdout
+        .take()
+        .ok_or_else(|| err("relay: no child stdout"))?;
+    let mut cerr = child
+        .stderr
+        .take()
+        .ok_or_else(|| err("relay: no child stderr"))?;
     let (mut lr, mut lw) = stream.into_split();
 
     // Client → remote. Finishing means the client half-closed after sending
@@ -319,7 +362,11 @@ async fn pump(target: &ExecTarget, stream: UnixStream, shutdown: watch::Receiver
     // surface why the relay gave up, instead of presenting every distinct
     // fault as an indistinguishable "connection closed"
     let mut errtext = String::new();
-    let _ = timeout(Duration::from_millis(200), cerr.read_to_string(&mut errtext)).await;
+    let _ = timeout(
+        Duration::from_millis(200),
+        cerr.read_to_string(&mut errtext),
+    )
+    .await;
     let errtext = errtext.trim();
     if !errtext.is_empty() {
         return Err(err(format!("relay: {errtext}")));
@@ -337,16 +384,25 @@ mod tests {
     #[test]
     fn socat_command_uses_dash_stdio_form() {
         let cmd = socat_bridge_command("/home/vscode/.config/herdr/herdr.sock");
-        assert_eq!(cmd, "socat - UNIX-CONNECT:/home/vscode/.config/herdr/herdr.sock");
+        assert_eq!(
+            cmd,
+            "socat - UNIX-CONNECT:/home/vscode/.config/herdr/herdr.sock"
+        );
     }
 
     /// A relay reports which bridge it is, so the log line can say so: catching
     /// a per-request relay child in `ps` after the fact is not a diagnostic.
     #[test]
     fn relay_command_reports_its_tool() {
-        let socat = RelayCommand { cmd: socat_bridge_command("/tmp/x.sock"), tool: "socat" };
+        let socat = RelayCommand {
+            cmd: socat_bridge_command("/tmp/x.sock"),
+            tool: "socat",
+        };
         assert_eq!(socat.tool(), "socat");
-        let py = RelayCommand { cmd: python_bridge_command("/tmp/x.sock"), tool: "python3" };
+        let py = RelayCommand {
+            cmd: python_bridge_command("/tmp/x.sock"),
+            tool: "python3",
+        };
         assert_eq!(py.tool(), "python3");
     }
 
@@ -356,7 +412,10 @@ mod tests {
     fn python_bridge_loops_until_the_write_completes() {
         let cmd = python_bridge_command("/tmp/x.sock");
         assert!(cmd.contains("n=os.write(1,b)"), "{cmd}");
-        assert!(cmd.contains("b=b[n:]"), "expected the remainder to be re-written: {cmd}");
+        assert!(
+            cmd.contains("b=b[n:]"),
+            "expected the remainder to be re-written: {cmd}"
+        );
     }
 
     /// The socket path must never appear verbatim in the command line: it is
@@ -366,9 +425,15 @@ mod tests {
     fn python_bridge_never_interpolates_the_raw_path() {
         let sock = "/tmp/x'; rm -rf ~ #.sock";
         let cmd = python_bridge_command(sock);
-        assert!(!cmd.contains(sock), "raw socket path leaked into the command line: {cmd}");
+        assert!(
+            !cmd.contains(sock),
+            "raw socket path leaked into the command line: {cmd}"
+        );
         let b64 = B64.encode(sock.as_bytes());
-        assert!(cmd.contains(&b64), "expected the base64 form present: {cmd}");
+        assert!(
+            cmd.contains(&b64),
+            "expected the base64 form present: {cmd}"
+        );
     }
 
     #[test]
@@ -377,7 +442,10 @@ mod tests {
         // an embedded one would end the quoting early and corrupt the command
         let cmd = python_bridge_command("/tmp/x.sock");
         let inner = cmd.split('\'').nth(1).expect("script segment");
-        assert!(!inner.contains('\''), "script must not contain single quotes: {inner}");
+        assert!(
+            !inner.contains('\''),
+            "script must not contain single quotes: {inner}"
+        );
     }
 
     /// End-to-end relay check against a real unix socket over a real ssh
@@ -423,26 +491,45 @@ mod tests {
             .expect("ssh master spawn");
         assert!(start.success(), "ssh ControlMaster failed to start");
 
-        let relay_cmd =
-            RelayCommand { cmd: python_bridge_command(&sock), tool: "python3" };
-        let handle = serve_relay(ctl_path.clone(), ssh_target.clone(), relay_cmd, local_sock.clone(), Logger::new(&dir, false))
-            .unwrap();
+        let relay_cmd = RelayCommand {
+            cmd: python_bridge_command(&sock),
+            tool: "python3",
+        };
+        let handle = serve_relay(
+            ctl_path.clone(),
+            ssh_target.clone(),
+            relay_cmd,
+            local_sock.clone(),
+            Logger::new(&dir, false),
+        )
+        .unwrap();
 
-        let mode = std::fs::metadata(&handle.path).unwrap().permissions().mode() & 0o777;
+        let mode = std::fs::metadata(&handle.path)
+            .unwrap()
+            .permissions()
+            .mode()
+            & 0o777;
         assert_eq!(mode, 0o600, "relay socket must be 0600, got {mode:o}");
 
-        let api = crate::api::ApiClient::connect(&handle.path).await.expect("ping through exec relay");
+        let api = crate::api::ApiClient::connect(&handle.path)
+            .await
+            .expect("ping through exec relay");
         eprintln!("ping ok");
 
         let snap = api
             .request("session.snapshot", serde_json::json!({}))
             .await
             .expect("session.snapshot through exec relay");
-        assert!(snap.pointer("/snapshot/workspaces").is_some(), "snapshot shape: {snap}");
+        assert!(
+            snap.pointer("/snapshot/workspaces").is_some(),
+            "snapshot shape: {snap}"
+        );
         eprintln!("snapshot ok ({} bytes)", snap.to_string().len());
 
         for _ in 0..5 {
-            api.request("session.snapshot", serde_json::json!({})).await.expect("repeat request");
+            api.request("session.snapshot", serde_json::json!({}))
+                .await
+                .expect("repeat request");
         }
         eprintln!("5 sequential requests ok");
 

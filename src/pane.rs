@@ -37,9 +37,9 @@ use tokio::signal::unix::{signal, SignalKind};
 use tokio::sync::mpsc;
 use tokio::time::Instant;
 
-use crate::util::{err, Result};
 use crate::grid::{Grid, Renderer};
 use crate::predict::Predictor;
+use crate::util::{err, Result};
 
 // ---------------------------------------------------------------------------
 // args
@@ -101,22 +101,29 @@ pub fn parse_args(argv: &[String]) -> Result<Args> {
     let mut it = argv.iter();
     while let Some(a) = it.next() {
         let mut next = |flag: &str| -> Result<String> {
-            it.next().cloned().ok_or_else(|| err(format!("{flag} needs a value")))
+            it.next()
+                .cloned()
+                .ok_or_else(|| err(format!("{flag} needs a value")))
         };
         match a.as_str() {
             "--remote-bin" => args.remote_bin = Some(next("--remote-bin")?),
             "--cols" => {
-                args.cols = next("--cols")?.parse().map_err(|_| err("--cols must be a number"))?;
+                args.cols = next("--cols")?
+                    .parse()
+                    .map_err(|_| err("--cols must be a number"))?;
                 args.size_fixed = true;
             }
             "--rows" => {
-                args.rows = next("--rows")?.parse().map_err(|_| err("--rows must be a number"))?;
+                args.rows = next("--rows")?
+                    .parse()
+                    .map_err(|_| err("--rows must be a number"))?;
                 args.size_fixed = true;
             }
             "--session" => args.session = Some(next("--session")?),
             "--control-idle" => {
-                args.control_idle_secs =
-                    next("--control-idle")?.parse().map_err(|_| err("--control-idle must be a number"))?
+                args.control_idle_secs = next("--control-idle")?
+                    .parse()
+                    .map_err(|_| err("--control-idle must be a number"))?
             }
             "--always-control" => args.always_control = true,
             "--ctl-path" => args.ctl_path = Some(next("--ctl-path")?),
@@ -135,12 +142,14 @@ pub fn parse_args(argv: &[String]) -> Result<Args> {
     }
     args.container = match (container_name, container_folder) {
         (Some(_), Some(_)) => return Err(err("--container and --container-folder are exclusive")),
-        (Some(n), None) => {
-            Some(ContainerArg { kind: crate::config::HostKind::DockerContainer(n), docker_bin })
-        }
-        (None, Some(f)) => {
-            Some(ContainerArg { kind: crate::config::HostKind::DockerFolder(f), docker_bin })
-        }
+        (Some(n), None) => Some(ContainerArg {
+            kind: crate::config::HostKind::DockerContainer(n),
+            docker_bin,
+        }),
+        (None, Some(f)) => Some(ContainerArg {
+            kind: crate::config::HostKind::DockerFolder(f),
+            docker_bin,
+        }),
         (None, None) => None,
     };
     args.ssh_target = positional.remove(0);
@@ -179,8 +188,16 @@ struct Frame {
 }
 
 enum Msg {
-    Frame { gen: u64, frame: Frame },
-    SessionExit { gen: u64, mode: Mode, reason: String, uptime: Duration },
+    Frame {
+        gen: u64,
+        frame: Frame,
+    },
+    SessionExit {
+        gen: u64,
+        mode: Mode,
+        reason: String,
+        uptime: Duration,
+    },
     Stdin(Vec<u8>),
     /// result of a background foreground-process poll: Some(true)=shell,
     /// Some(false)=TUI, None=poll failed (keep last value)
@@ -199,7 +216,14 @@ pub(crate) fn sh_quote(s: &str) -> String {
     format!("'{}'", s.replace('\'', "'\\''"))
 }
 
-fn spawn_session(args: &Args, mode: Mode, cols: usize, rows: usize, gen: u64, tx: mpsc::Sender<Msg>) -> Result<Session> {
+fn spawn_session(
+    args: &Args,
+    mode: Mode,
+    cols: usize,
+    rows: usize,
+    gen: u64,
+    tx: mpsc::Sender<Msg>,
+) -> Result<Session> {
     let session_flag = args
         .session
         .as_ref()
@@ -223,7 +247,9 @@ fn spawn_session(args: &Args, mode: Mode, cols: usize, rows: usize, gen: u64, tx
     let mut builder = match &args.container {
         None => {
             let mut c = tokio::process::Command::new("ssh");
-            c.args(crate::remote::SSH_COMMON_OPTS).arg(&args.ssh_target).arg(cmd);
+            c.args(crate::remote::SSH_COMMON_OPTS)
+                .arg(&args.ssh_target)
+                .arg(cmd);
             c
         }
         Some(ct) => {
@@ -231,11 +257,8 @@ fn spawn_session(args: &Args, mode: Mode, cols: usize, rows: usize, gen: u64, tx
             // reconnect. Bounded: this runs on the pane's single-threaded
             // runtime, so a wedged Docker daemon must not be able to freeze
             // input, rendering or signal handling.
-            let id = crate::docker::resolve_blocking(
-                &ct.docker_bin,
-                &ct.kind,
-                Duration::from_secs(5),
-            )?;
+            let id =
+                crate::docker::resolve_blocking(&ct.docker_bin, &ct.kind, Duration::from_secs(5))?;
             let mut c = tokio::process::Command::new(&ct.docker_bin);
             // `sh -c` not `-lc`: match ssh's non-login remote shell
             c.args(["exec", "-i", &id, "sh", "-c", &cmd]);
@@ -265,7 +288,14 @@ fn spawn_session(args: &Args, mode: Mode, cols: usize, rows: usize, gen: u64, tx
                 buf.push_str(&l);
                 buf.push('\n');
                 if buf.len() > 400 {
-                    let tail: String = buf.chars().rev().take(400).collect::<Vec<_>>().into_iter().rev().collect();
+                    let tail: String = buf
+                        .chars()
+                        .rev()
+                        .take(400)
+                        .collect::<Vec<_>>()
+                        .into_iter()
+                        .rev()
+                        .collect();
                     *buf = tail;
                 }
             }
@@ -273,7 +303,9 @@ fn spawn_session(args: &Args, mode: Mode, cols: usize, rows: usize, gen: u64, tx
         let mut close_reason = String::new();
         let mut lines = BufReader::new(stdout).lines();
         while let Ok(Some(line)) = lines.next_line().await {
-            let Ok(frame) = serde_json::from_str::<Frame>(&line) else { continue };
+            let Ok(frame) = serde_json::from_str::<Frame>(&line) else {
+                continue;
+            };
             if frame.kind == "terminal.closed" {
                 if let Some(r) = &frame.reason {
                     close_reason = r.clone();
@@ -286,11 +318,27 @@ fn spawn_session(args: &Args, mode: Mode, cols: usize, rows: usize, gen: u64, tx
         let _ = child.wait().await;
         stderr_task.abort();
         let tail = err_tail.lock().unwrap().trim().to_string();
-        let reason = if close_reason.is_empty() { tail } else { close_reason };
-        let _ = tx.send(Msg::SessionExit { gen, mode, reason, uptime: started.elapsed() }).await;
+        let reason = if close_reason.is_empty() {
+            tail
+        } else {
+            close_reason
+        };
+        let _ = tx
+            .send(Msg::SessionExit {
+                gen,
+                mode,
+                reason,
+                uptime: started.elapsed(),
+            })
+            .await;
     });
 
-    Ok(Session { gen, mode, pid, stdin })
+    Ok(Session {
+        gen,
+        mode,
+        pid,
+        stdin,
+    })
 }
 
 // ---------------------------------------------------------------------------
@@ -336,7 +384,10 @@ fn initial_mode(always_control: bool, size: (usize, usize)) -> Mode {
 fn term_size() -> (usize, usize) {
     unsafe {
         let mut ws: libc::winsize = std::mem::zeroed();
-        if libc::ioctl(libc::STDOUT_FILENO, libc::TIOCGWINSZ, &mut ws) == 0 && ws.ws_col > 0 && ws.ws_row > 0 {
+        if libc::ioctl(libc::STDOUT_FILENO, libc::TIOCGWINSZ, &mut ws) == 0
+            && ws.ws_col > 0
+            && ws.ws_row > 0
+        {
             return (ws.ws_col as usize, ws.ws_row as usize);
         }
     }
@@ -392,7 +443,9 @@ fn parse_mouse(bytes: &[u8], at: usize) -> Option<(u32, u32, u32, bool, usize)> 
         match rest[i] {
             b'0'..=b'9' => {
                 // saturate: garbage digit runs on stdin must not overflow-panic
-                nums[n] = nums[n].saturating_mul(10).saturating_add((rest[i] - b'0') as u32);
+                nums[n] = nums[n]
+                    .saturating_mul(10)
+                    .saturating_add((rest[i] - b'0') as u32);
                 have_digit = true;
                 i += 1;
             }
@@ -454,7 +507,6 @@ fn contains_wheel_press(bytes: &[u8]) -> bool {
 fn has_mouse_seq(bytes: &[u8]) -> bool {
     bytes.windows(3).any(|w| w == [0x1b, b'[', b'<'])
 }
-
 
 // ---------------------------------------------------------------------------
 // the wrapper state machine
@@ -548,7 +600,11 @@ impl App {
     /// Msg::Foreground and updates `remote_is_shell`.
     fn spawn_foreground_poll(&mut self, force: bool) {
         let now = Instant::now();
-        if !force && self.fg_poll_at.is_some_and(|t| now.duration_since(t) < FG_POLL_INTERVAL) {
+        if !force
+            && self
+                .fg_poll_at
+                .is_some_and(|t| now.duration_since(t) < FG_POLL_INTERVAL)
+        {
             return;
         }
         self.fg_poll_at = Some(now);
@@ -584,7 +640,11 @@ impl App {
             return;
         }
         self.mouse_grabbed = want;
-        write_stdout(if want { "\x1b[?1002h\x1b[?1006h" } else { "\x1b[?1002l" });
+        write_stdout(if want {
+            "\x1b[?1002h\x1b[?1006h"
+        } else {
+            "\x1b[?1002l"
+        });
     }
 
     /// Match the local pane's cursor-key mode to the remote's, so the arrow bytes
@@ -630,7 +690,10 @@ impl App {
         if let Some(mut s) = self.session.take() {
             tokio::spawn(async move {
                 if s.mode == Mode::Control {
-                    let _ = s.stdin.write_all(b"{\"type\":\"terminal.release\"}\n").await;
+                    let _ = s
+                        .stdin
+                        .write_all(b"{\"type\":\"terminal.release\"}\n")
+                        .await;
                 }
                 tokio::time::sleep(Duration::from_millis(150)).await;
                 unsafe { libc::kill(s.pid, libc::SIGTERM) };
@@ -656,7 +719,9 @@ impl App {
                     self.last_input = Instant::now();
                     // keystrokes typed while the control session was spinning up
                     for buf in std::mem::take(&mut self.pending_input) {
-                        let line = json!({ "type": "terminal.input", "bytes": B64.encode(&buf) }).to_string() + "\n";
+                        let line = json!({ "type": "terminal.input", "bytes": B64.encode(&buf) })
+                            .to_string()
+                            + "\n";
                         let _ = s.stdin.write_all(line.as_bytes()).await;
                     }
                 } else {
@@ -666,13 +731,12 @@ impl App {
                 // warm the foreground classification before the user mouses
                 self.spawn_foreground_poll(false);
                 // always-control has no release, so no "ctrl+\ to release" hint
-                self.renderer.status(
-                    if m == Mode::Control && !self.args.always_control {
+                self.renderer
+                    .status(if m == Mode::Control && !self.args.always_control {
                         "CONTROL — ctrl+\\ to release"
                     } else {
                         ""
-                    },
-                );
+                    });
             }
             Err(e) => self.schedule_reconnect(m, &e.to_string()),
         }
@@ -681,9 +745,16 @@ impl App {
     fn schedule_reconnect(&mut self, m: Mode, reason: &str) {
         let delay = BACKOFF[self.backoff_idx.min(BACKOFF.len() - 1)];
         self.backoff_idx += 1;
-        let suffix = if reason.is_empty() { String::new() } else { format!(" — {reason}") };
-        self.renderer
-            .status(&format!("reconnecting in {}s ({}){suffix}", delay / 1000, m.as_str()));
+        let suffix = if reason.is_empty() {
+            String::new()
+        } else {
+            format!(" — {reason}")
+        };
+        self.renderer.status(&format!(
+            "reconnecting in {}s ({}){suffix}",
+            delay / 1000,
+            m.as_str()
+        ));
         self.paint();
         self.reconnect_at = Some((Instant::now() + Duration::from_millis(delay), m));
     }
@@ -700,7 +771,11 @@ impl App {
         self.stop_session();
         self.renderer.invalidate();
         // immediate feedback for the mode-switch gap (stop + 200ms + reconnect)
-        self.renderer.status(if m == Mode::Control { "taking control…" } else { "releasing…" });
+        self.renderer.status(if m == Mode::Control {
+            "taking control…"
+        } else {
+            "releasing…"
+        });
         self.paint();
         self.switch_at = Some(Instant::now() + SWITCH_GAP);
     }
@@ -710,8 +785,13 @@ impl App {
             return; // stale frame from a replaced session
         }
         if frame.kind == "terminal.closed" {
-            let suffix = frame.reason.as_deref().map(|r| format!(": {r}")).unwrap_or_default();
-            self.renderer.status(&format!("remote terminal closed{suffix}"));
+            let suffix = frame
+                .reason
+                .as_deref()
+                .map(|r| format!(": {r}"))
+                .unwrap_or_default();
+            self.renderer
+                .status(&format!("remote terminal closed{suffix}"));
             self.paint();
             return;
         }
@@ -721,8 +801,10 @@ impl App {
         let Some(bytes) = &frame.bytes else { return };
         self.backoff_idx = 0;
         self.renderer.status("");
-        self.grid
-            .resize(frame.width.unwrap_or(self.grid.width), frame.height.unwrap_or(self.grid.height));
+        self.grid.resize(
+            frame.width.unwrap_or(self.grid.width),
+            frame.height.unwrap_or(self.grid.height),
+        );
         if frame.full == Some(true) {
             self.grid.clear();
         }
@@ -732,7 +814,12 @@ impl App {
             self.predict.on_frame(&self.grid);
         }
         if self.args.dump {
-            let lines: Vec<String> = self.grid.text_lines().into_iter().filter(|l| !l.is_empty()).collect();
+            let lines: Vec<String> = self
+                .grid
+                .text_lines()
+                .into_iter()
+                .filter(|l| !l.is_empty())
+                .collect();
             println!(
                 "--- frame seq={:?} full={:?} {}x{} ---\n{}",
                 frame.seq,
@@ -751,18 +838,32 @@ impl App {
             return; // an old child we already replaced/killed
         }
         self.session = None;
-        let reason_line =
-            reason.lines().map(str::trim).rfind(|l| !l.is_empty()).unwrap_or("").to_string();
+        let reason_line = reason
+            .lines()
+            .map(str::trim)
+            .rfind(|l| !l.is_empty())
+            .unwrap_or("")
+            .to_string();
         // control that dies quickly twice is failing (refused/dropped): fall
         // back to observe so the pane stays viewable; a keystroke retries
         if exited_mode == Mode::Control {
-            self.control_failures = if uptime < QUICK_CONTROL_FAILURE { self.control_failures + 1 } else { 0 };
+            self.control_failures = if uptime < QUICK_CONTROL_FAILURE {
+                self.control_failures + 1
+            } else {
+                0
+            };
             if self.control_failures >= 2 {
                 self.control_failures = 0;
                 self.control_sticky = true;
                 self.switch_mode(Mode::Observe);
-                let suffix = if reason_line.is_empty() { String::new() } else { format!(" ({reason_line})") };
-                self.hint(&format!("control unavailable — viewing only{suffix}; type to retry"));
+                let suffix = if reason_line.is_empty() {
+                    String::new()
+                } else {
+                    format!(" ({reason_line})")
+                };
+                self.hint(&format!(
+                    "control unavailable — viewing only{suffix}; type to retry"
+                ));
                 return;
             }
         }
@@ -887,10 +988,11 @@ pub async fn run(args: Args) -> Result<()> {
     // (see util::streamer_pid_path); --dump is a human diagnostic, not a
     // daemon-spawned streamer, so it must not claim the slot
     let _pidfile = (!args.dump).then(|| {
-        let state_dir =
-            crate::util::home_dir().join(".local").join("state").join("herdr-mirror");
-        let path =
-            crate::util::streamer_pid_path(&state_dir, &args.ssh_target, &args.pane_target);
+        let state_dir = crate::util::home_dir()
+            .join(".local")
+            .join("state")
+            .join("herdr-mirror");
+        let path = crate::util::streamer_pid_path(&state_dir, &args.ssh_target, &args.pane_target);
         if let Some(dir) = path.parent() {
             let _ = std::fs::create_dir_all(dir);
         }
@@ -972,10 +1074,12 @@ pub async fn run(args: Args) -> Result<()> {
     let mut sighup = signal(SignalKind::hangup())?; // pane closed — don't orphan the ssh child
     let mut sigwinch = signal(SignalKind::window_change())?;
 
-    app.connect(initial_mode(app.args.always_control, term_size())).await;
+    app.connect(initial_mode(app.args.always_control, term_size()))
+        .await;
     // the pane may have been laid out while the session was spawning; the signal
     // for that is buffered above, but check directly too
-    if app.mode == Mode::Observe && initial_mode(app.args.always_control, term_size()) == Mode::Control
+    if app.mode == Mode::Observe
+        && initial_mode(app.args.always_control, term_size()) == Mode::Control
     {
         app.switch_mode(Mode::Control);
     } else if app.args.always_control && app.mode == Mode::Observe {
@@ -1073,7 +1177,10 @@ pub async fn run(args: Args) -> Result<()> {
     // clean shutdown: release control if held, kill the ssh child, restore tty
     if let Some(mut s) = app.session.take() {
         if s.mode == Mode::Control {
-            let _ = s.stdin.write_all(b"{\"type\":\"terminal.release\"}\n").await;
+            let _ = s
+                .stdin
+                .write_all(b"{\"type\":\"terminal.release\"}\n")
+                .await;
             tokio::time::sleep(Duration::from_millis(100)).await;
         }
         unsafe { libc::kill(s.pid, libc::SIGTERM) };
@@ -1098,11 +1205,23 @@ mod tests {
         // remote foreground classified as a TUI (e.g. `claude`) — wheel must
         // still produce a semantic scroll, not a raw forward, or it silently
         // does nothing when the TUI doesn't consume mouse wheel input
-        assert_eq!(mouse_action(Some(false), 64, true), MouseAction::Scroll { up: true });
-        assert_eq!(mouse_action(Some(false), 65, true), MouseAction::Scroll { up: false });
+        assert_eq!(
+            mouse_action(Some(false), 64, true),
+            MouseAction::Scroll { up: true }
+        );
+        assert_eq!(
+            mouse_action(Some(false), 65, true),
+            MouseAction::Scroll { up: false }
+        );
         // unclassified/shell foreground: wheel still scrolls
-        assert_eq!(mouse_action(None, 64, true), MouseAction::Scroll { up: true });
-        assert_eq!(mouse_action(Some(true), 65, true), MouseAction::Scroll { up: false });
+        assert_eq!(
+            mouse_action(None, 64, true),
+            MouseAction::Scroll { up: true }
+        );
+        assert_eq!(
+            mouse_action(Some(true), 65, true),
+            MouseAction::Scroll { up: false }
+        );
         // non-wheel clicks/drags keep the existing foreground-based routing
         assert_eq!(mouse_action(Some(false), 0, true), MouseAction::ForwardRaw); // TUI click
         assert_eq!(mouse_action(Some(true), 0, true), MouseAction::Drop); // shell click
@@ -1121,7 +1240,6 @@ mod tests {
         assert!(!has_mouse_seq(b"plain text"));
     }
 
-
     #[test]
     fn sh_quote_escapes_single_quotes() {
         assert_eq!(sh_quote("w9:p1"), "'w9:p1'");
@@ -1133,11 +1251,19 @@ mod tests {
 
     #[test]
     fn arg_parsing() {
-        let argv: Vec<String> =
-            ["work", "w9:p1", "--remote-bin", "/opt/herdr", "--cols", "176", "--rows", "66"]
-                .iter()
-                .map(|s| s.to_string())
-                .collect();
+        let argv: Vec<String> = [
+            "work",
+            "w9:p1",
+            "--remote-bin",
+            "/opt/herdr",
+            "--cols",
+            "176",
+            "--rows",
+            "66",
+        ]
+        .iter()
+        .map(|s| s.to_string())
+        .collect();
         let a = parse_args(&argv).unwrap();
         assert_eq!(a.ssh_target, "work");
         assert_eq!(a.pane_target, "w9:p1");
@@ -1145,7 +1271,13 @@ mod tests {
         assert_eq!((a.cols, a.rows), (176, 66));
         assert!(a.size_fixed);
         assert!(parse_args(&["onlyone".to_string()]).is_err());
-        assert!(parse_args(&["a".into(), "b".into(), "--visibility-file".into(), "x".into()]).is_err());
+        assert!(parse_args(&[
+            "a".into(),
+            "b".into(),
+            "--visibility-file".into(),
+            "x".into()
+        ])
+        .is_err());
     }
 
     // --- birth size trust (#23) ---
@@ -1177,7 +1309,11 @@ mod tests {
         // the whole composition: only a trusted size under always_control opens
         // writable, because Control is what can resize the remote
         assert_eq!(initial_mode(true, (141, 44)), Mode::Control);
-        assert_eq!(initial_mode(true, (54, 23)), Mode::Observe, "placeholder-sized");
+        assert_eq!(
+            initial_mode(true, (54, 23)),
+            Mode::Observe,
+            "placeholder-sized"
+        );
         // without always_control we start read-only regardless, as before
         assert_eq!(initial_mode(false, (141, 44)), Mode::Observe);
         assert_eq!(initial_mode(false, (54, 23)), Mode::Observe);

@@ -33,7 +33,8 @@ impl CloseTracker {
     /// for the user closing the mirror. Must be called BEFORE the close.
     pub fn mark_self_close(&mut self, local_id: &str) {
         self.expire();
-        self.self_closed.insert(local_id.to_string(), Instant::now());
+        self.self_closed
+            .insert(local_id.to_string(), Instant::now());
     }
 
     /// Record a local close event. Ours → swallowed as an echo; anything else is
@@ -43,15 +44,20 @@ impl CloseTracker {
         if self.self_closed.remove(local_id).is_some() {
             return;
         }
-        self.user_closed.insert(local_id.to_string(), Instant::now());
+        self.user_closed
+            .insert(local_id.to_string(), Instant::now());
     }
 
     /// Take the user-closed ids among `mine` (this host's mapped local ids).
     /// Draining keeps one host's converge from consuming another's.
     pub fn take_user_closed(&mut self, mine: &HashSet<String>) -> HashSet<String> {
         self.expire();
-        let hit: HashSet<String> =
-            self.user_closed.keys().filter(|id| mine.contains(*id)).cloned().collect();
+        let hit: HashSet<String> = self
+            .user_closed
+            .keys()
+            .filter(|id| mine.contains(*id))
+            .cloned()
+            .collect();
         for id in &hit {
             self.user_closed.remove(id);
         }
@@ -60,8 +66,10 @@ impl CloseTracker {
 
     fn expire(&mut self) {
         let now = Instant::now();
-        self.self_closed.retain(|_, at| now.duration_since(*at) < SELF_CLOSE_TTL);
-        self.user_closed.retain(|_, at| now.duration_since(*at) < USER_CLOSE_TTL);
+        self.self_closed
+            .retain(|_, at| now.duration_since(*at) < SELF_CLOSE_TTL);
+        self.user_closed
+            .retain(|_, at| now.duration_since(*at) < USER_CLOSE_TTL);
     }
 }
 
@@ -103,7 +111,7 @@ mod tests {
         let mut t = CloseTracker::default();
         t.mark_self_close("w1");
         t.note_close_event("w1"); // ours — swallowed, mark consumed
-        // the id is later re-mapped (heal adopts it) and the user closes it
+                                  // the id is later re-mapped (heal adopts it) and the user closes it
         t.note_close_event("w1");
         assert_eq!(t.take_user_closed(&ids(&["w1"])), ids(&["w1"]));
     }

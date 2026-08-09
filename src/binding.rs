@@ -47,7 +47,8 @@ fn herdr_config_path() -> PathBuf {
 /// and copy-pasting it into `bind` is the documented workflow.
 fn valid_spec(s: &str) -> bool {
     !s.is_empty()
-        && s.chars().all(|c| c.is_ascii_alphanumeric() || matches!(c, ':' | '.' | '_' | '-'))
+        && s.chars()
+            .all(|c| c.is_ascii_alphanumeric() || matches!(c, ':' | '.' | '_' | '-'))
 }
 
 /// Key combos are alphanumeric segments joined by '+' (prefix+alt+l, f1,
@@ -55,13 +56,16 @@ fn valid_spec(s: &str) -> bool {
 /// so it's refused rather than escaped.
 fn valid_key(s: &str) -> bool {
     !s.is_empty()
-        && s.chars().all(|c| c.is_ascii_alphanumeric() || matches!(c, '+' | '_' | '-'))
+        && s.chars()
+            .all(|c| c.is_ascii_alphanumeric() || matches!(c, '+' | '_' | '-'))
 }
 
 /// Replace control characters before terminal output — remote-supplied titles
 /// must not be able to smuggle escape sequences into the user's terminal.
 fn printable(s: &str) -> String {
-    s.chars().map(|c| if c.is_control() { ' ' } else { c }).collect()
+    s.chars()
+        .map(|c| if c.is_control() { ' ' } else { c })
+        .collect()
 }
 
 /// Is `key` already the value of some binding line? Covers `key = "<k>"` in
@@ -76,7 +80,9 @@ fn key_bound_in(content: &str, key: &str) -> bool {
         if l.starts_with('#') {
             return false;
         }
-        let Some((_, v)) = l.split_once('=') else { return false };
+        let Some((_, v)) = l.split_once('=') else {
+            return false;
+        };
         let v = v.split('#').next().unwrap_or("").trim();
         v == dq || v == sq
     })
@@ -147,7 +153,11 @@ pub async fn remote_actions(env: Env, host_arg: Option<&str>) -> Result<()> {
                 let known: Vec<&str> = hosts.iter().map(|h| h.name.as_str()).collect();
                 return Err(err(format!(
                     "unknown host {name:?} (configured: {})",
-                    if known.is_empty() { "none".into() } else { known.join(", ") }
+                    if known.is_empty() {
+                        "none".into()
+                    } else {
+                        known.join(", ")
+                    }
                 )));
             }
         }
@@ -191,7 +201,8 @@ pub async fn remote_actions(env: Env, host_arg: Option<&str>) -> Result<()> {
 /// in the file (a duplicate key would be ambiguous, and this tool only ever
 /// appends); a spec bound by us already is a no-op.
 pub async fn bind(env: Env, spec: &str, key: &str) -> Result<()> {
-    if !valid_spec(spec) || matches!(spec.split_once('.'), Some((p, a)) if p.is_empty() || a.is_empty())
+    if !valid_spec(spec)
+        || matches!(spec.split_once('.'), Some((p, a)) if p.is_empty() || a.is_empty())
     {
         return Err(err(format!(
             "bad action spec {spec:?}: want <plugin>.<action> using only letters, digits, and :._-"
@@ -234,7 +245,10 @@ pub async fn bind(env: Env, spec: &str, key: &str) -> Result<()> {
     };
 
     if content.contains(&format!("{MARKER} {spec}\n")) {
-        println!("{spec} is already bound by herdr-mirror in {}", path.display());
+        println!(
+            "{spec} is already bound by herdr-mirror in {}",
+            path.display()
+        );
         return Ok(());
     }
     if key_bound_in(&content, key) {
@@ -280,8 +294,12 @@ pub async fn unbind(env: Env, what: &str) -> Result<()> {
                 && block[1].trim() == "[[keys.command]]"
                 && block[2].trim().starts_with("key = \"")
                 && block[3].trim() == "type = \"shell\""
-                && block[4].trim().starts_with(&format!("command = \"{CLI_PATH} remote-invoke "));
-            let key_hit = block.iter().any(|l| l.trim() == format!("key = \"{what}\""));
+                && block[4]
+                    .trim()
+                    .starts_with(&format!("command = \"{CLI_PATH} remote-invoke "));
+            let key_hit = block
+                .iter()
+                .any(|l| l.trim() == format!("key = \"{what}\""));
             if is_our_block && (spec.trim() == what || key_hit) {
                 if out.ends_with("\n\n") {
                     out.pop(); // the blank separator the append added

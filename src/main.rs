@@ -47,7 +47,9 @@ fn main() {
 }
 
 fn run(cmd: &str, rest: &[String]) -> Result<()> {
-    let rt = tokio::runtime::Builder::new_current_thread().enable_all().build()?;
+    let rt = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()?;
     let result = run_on(&rt, cmd, rest);
     // pane mode's blocking stdin read would hang a plain Runtime::drop forever
     rt.shutdown_background();
