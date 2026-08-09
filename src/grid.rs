@@ -37,7 +37,10 @@ pub struct Grid {
 
 impl Grid {
     pub fn new() -> Grid {
-        Grid { cursor_visible: true, ..Default::default() }
+        Grid {
+            cursor_visible: true,
+            ..Default::default()
+        }
     }
 
     pub fn resize(&mut self, width: usize, height: usize) {
@@ -67,7 +70,9 @@ impl Grid {
                 if let Some((params, final_ch, len)) = parse_csi(&chars[i..]) {
                     match final_ch {
                         'H' => {
-                            let mut it = params.split(';').map(|n| n.parse::<usize>().unwrap_or(1).max(1));
+                            let mut it = params
+                                .split(';')
+                                .map(|n| n.parse::<usize>().unwrap_or(1).max(1));
                             row = it.next().unwrap_or(1) - 1;
                             col = it.next().unwrap_or(1) - 1;
                         }
@@ -93,7 +98,10 @@ impl Grid {
                 let ch = if ch == '\t' { ' ' } else { ch };
                 let w = cw(ch);
                 if row < self.height && col < self.width {
-                    self.rows[row][col] = Some(Cell { sgr: sgr.clone(), ch });
+                    self.rows[row][col] = Some(Cell {
+                        sgr: sgr.clone(),
+                        ch,
+                    });
                     // wide char spans two columns: clear any stale cell in the
                     // spacer slot so delta frames cannot leave mixed glyphs
                     if w == 2 && col + 1 < self.width {
@@ -114,7 +122,11 @@ impl Grid {
         self.content_bottom = self
             .rows
             .iter()
-            .rposition(|cells| cells.iter().any(|c| c.as_ref().is_some_and(|c| c.ch != ' ')))
+            .rposition(|cells| {
+                cells
+                    .iter()
+                    .any(|c| c.as_ref().is_some_and(|c| c.ch != ' '))
+            })
             .unwrap_or(0);
     }
 
@@ -263,8 +275,14 @@ impl Renderer {
             }
         }
         let cr = grid.cursor_row as isize - offset_r as isize;
-        if grid.cursor_visible && cr >= 0 && (cr as usize) < out_rows && self.status_text.is_empty() {
-            let _ = write!(out, "\x1b[{};{}H\x1b[?25h", cr + 1, grid.cursor_col.min(out_cols.saturating_sub(1)) + 1);
+        if grid.cursor_visible && cr >= 0 && (cr as usize) < out_rows && self.status_text.is_empty()
+        {
+            let _ = write!(
+                out,
+                "\x1b[{};{}H\x1b[?25h",
+                cr + 1,
+                grid.cursor_col.min(out_cols.saturating_sub(1)) + 1
+            );
         }
         out.push_str("\x1b[?2026l");
         out
@@ -310,9 +328,18 @@ mod tests {
     #[test]
     fn csi_parsing_shape() {
         // params stop at the first intermediate; the final is reported
-        assert_eq!(parse_csi(&"\x1b[2 q".chars().collect::<Vec<_>>()), Some(("2".into(), 'q', 5)));
-        assert_eq!(parse_csi(&"\x1b[?25h".chars().collect::<Vec<_>>()), Some(("?25".into(), 'h', 6)));
-        assert_eq!(parse_csi(&"\x1b[1;31m".chars().collect::<Vec<_>>()), Some(("1;31".into(), 'm', 7)));
+        assert_eq!(
+            parse_csi(&"\x1b[2 q".chars().collect::<Vec<_>>()),
+            Some(("2".into(), 'q', 5))
+        );
+        assert_eq!(
+            parse_csi(&"\x1b[?25h".chars().collect::<Vec<_>>()),
+            Some(("?25".into(), 'h', 6))
+        );
+        assert_eq!(
+            parse_csi(&"\x1b[1;31m".chars().collect::<Vec<_>>()),
+            Some(("1;31".into(), 'm', 7))
+        );
         // C1 and other non-CSI bytes are still rejected
         assert_eq!(parse_csi(&"\x1b[1;\x07m".chars().collect::<Vec<_>>()), None);
     }
@@ -383,7 +410,10 @@ mod tests {
         let mut r = Renderer::new();
         let out = r.paint(&g, 5, 1);
         assert!(out.contains("abcde"), "got: {out:?}");
-        assert!(!out.contains("abcde\x1b[0m\x1b[K"), "EL would erase the 'e': {out:?}");
+        assert!(
+            !out.contains("abcde\x1b[0m\x1b[K"),
+            "EL would erase the 'e': {out:?}"
+        );
     }
 
     #[test]
@@ -395,7 +425,10 @@ mod tests {
         g.apply("\x1b[1;1Hab");
         let mut r = Renderer::new();
         let out = r.paint(&g, 10, 1);
-        assert!(out.contains("\x1b[K"), "narrow grid must still emit EL: {out:?}");
+        assert!(
+            out.contains("\x1b[K"),
+            "narrow grid must still emit EL: {out:?}"
+        );
     }
 
     #[test]

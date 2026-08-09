@@ -39,7 +39,11 @@ fn pid_path(env: &Env) -> PathBuf {
 }
 
 pub fn running_pid(env: &Env) -> Option<i32> {
-    let pid: i32 = fs::read_to_string(pid_path(env)).ok()?.trim().parse().ok()?;
+    let pid: i32 = fs::read_to_string(pid_path(env))
+        .ok()?
+        .trim()
+        .parse()
+        .ok()?;
     pid_alive(pid).then_some(pid)
 }
 
@@ -89,8 +93,15 @@ const BROADCAST_SUBS: &[&str] = &[
 ];
 
 fn sub_list(pane_ids: &[String]) -> Vec<Value> {
-    let mut subs: Vec<Value> = BROADCAST_SUBS.iter().map(|t| json!({ "type": t })).collect();
-    subs.extend(pane_ids.iter().map(|p| json!({ "type": "pane.agent_status_changed", "pane_id": p })));
+    let mut subs: Vec<Value> = BROADCAST_SUBS
+        .iter()
+        .map(|t| json!({ "type": t }))
+        .collect();
+    subs.extend(
+        pane_ids
+            .iter()
+            .map(|p| json!({ "type": "pane.agent_status_changed", "pane_id": p })),
+    );
     subs
 }
 
@@ -149,10 +160,19 @@ async fn flush_status(ctx: &HostCtx, pending: HashMap<String, Value>) -> bool {
         }
         let info: AgentInfo = serde_json::from_value(data).unwrap_or_default();
         let agent = info.has_agent().then_some(&info);
-        push_pane_status(&ctx.local, &ctx.host.name, &remote_id, entry, agent, &ctx.log).await;
+        push_pane_status(
+            &ctx.local,
+            &ctx.host.name,
+            &remote_id,
+            entry,
+            agent,
+            &ctx.log,
+        )
+        .await;
     }
     if let Err(e) = save_state(&ctx.env_state_dir, &ctx.host.name, &state) {
-        ctx.log.log(&format!("[{}] state save failed: {e}", ctx.host.name));
+        ctx.log
+            .log(&format!("[{}] state save failed: {e}", ctx.host.name));
     }
     need_converge
 }
@@ -215,7 +235,8 @@ async fn run_connected(
     let mut subscribed_key = String::from("<broadcast>");
     let state = converge(&deps).await?;
     resubscribe(ctx, &remote, &mut stream, &mut subscribed_key, &state).await?;
-    ctx.log.log(&format!("[{}] connected and synced", ctx.host.name));
+    ctx.log
+        .log(&format!("[{}] connected and synced", ctx.host.name));
 
     let mut converge_at: Option<Instant> = None;
     let mut status_at: Option<Instant> = None;
@@ -316,8 +337,13 @@ async fn host_task(ctx: HostCtx, mut poke: mpsc::Receiver<()>) {
             Ok(()) => unreachable!("run_connected only returns on error"),
             Err(e) => e,
         };
-        mark_unknown(&ctx.local, &ctx.env_state_dir, &ctx.host.name, "mirror: connection lost")
-            .await;
+        mark_unknown(
+            &ctx.local,
+            &ctx.env_state_dir,
+            &ctx.host.name,
+            "mirror: connection lost",
+        )
+        .await;
         // starts_with, not contains: the marker is always emitted as a prefix,
         // while the error text can embed user strings (target, remote_bin). A
         // substring test would make an ssh host named `dormant-box` back off
@@ -337,7 +363,10 @@ async fn host_task(ctx: HostCtx, mut poke: mpsc::Receiver<()>) {
         }
         // log dormancy once on entry, not on every poll of a stopped container
         if !dormant || !was_dormant {
-            ctx.log.log(&format!("[{}] disconnected ({e}) — retrying in {delay}s", ctx.host.name));
+            ctx.log.log(&format!(
+                "[{}] disconnected ({e}) — retrying in {delay}s",
+                ctx.host.name
+            ));
         }
         was_dormant = dormant;
         tokio::time::sleep(Duration::from_secs(delay)).await;
@@ -358,10 +387,17 @@ async fn host_task(ctx: HostCtx, mut poke: mpsc::Receiver<()>) {
 /// Generation-agnostic by construction — every streamer ever shipped is
 /// `herdr-mirror pane …`, whatever flags follow.
 async fn has_live_streamer(local: &ApiClient, pane_id: &str) -> Option<bool> {
-    let v = local.request("pane.process_info", json!({ "pane_id": pane_id })).await.ok()?;
-    let procs = v.pointer("/process_info/foreground_processes")?.as_array()?;
+    let v = local
+        .request("pane.process_info", json!({ "pane_id": pane_id }))
+        .await
+        .ok()?;
+    let procs = v
+        .pointer("/process_info/foreground_processes")?
+        .as_array()?;
     Some(procs.iter().any(|p| {
-        p.get("argv").and_then(|a| a.as_array()).is_some_and(|argv| is_streamer_argv(argv))
+        p.get("argv")
+            .and_then(|a| a.as_array())
+            .is_some_and(|argv| is_streamer_argv(argv))
     }))
 }
 
@@ -372,7 +408,9 @@ async fn has_live_streamer(local: &ApiClient, pane_id: &str) -> Option<bool> {
 /// subcommand so an unrelated `herdr-mirror status` in the pane is not mistaken
 /// for a live stream.
 fn is_streamer_argv(argv: &[Value]) -> bool {
-    argv.first().and_then(|s| s.as_str()).is_some_and(|e| e.ends_with("herdr-mirror"))
+    argv.first()
+        .and_then(|s| s.as_str())
+        .is_some_and(|e| e.ends_with("herdr-mirror"))
         && argv.get(1).and_then(|s| s.as_str()) == Some("pane")
 }
 
@@ -512,12 +550,24 @@ pub async fn cmd_run(env: Env) -> Result<()> {
     log.log(&format!(
         "daemon starting (pid {}, hosts: {}, config: {})",
         std::process::id(),
-        config.hosts.iter().map(|h| h.name.as_str()).collect::<Vec<_>>().join(", "),
-        config.source.as_ref().map(|p| p.display().to_string()).unwrap_or_else(|| "?".into())
+        config
+            .hosts
+            .iter()
+            .map(|h| h.name.as_str())
+            .collect::<Vec<_>>()
+            .join(", "),
+        config
+            .source
+            .as_ref()
+            .map(|p| p.display().to_string())
+            .unwrap_or_else(|| "?".into())
     ));
     // two configs on disk is a silent trap: the loser is ignored with no sign
     for ignored in &config.shadowed {
-        log.log(&format!("warning: ignoring shadowed config at {}", ignored.display()));
+        log.log(&format!(
+            "warning: ignoring shadowed config at {}",
+            ignored.display()
+        ));
     }
     // a skipped host would otherwise just be quietly absent from the sidebar
     for w in &config.warnings {
@@ -529,7 +579,9 @@ pub async fn cmd_run(env: Env) -> Result<()> {
     // it dies silently, but the repair stays behind the explicit `start`
     // command — the daemon never rewrites the filesystem in the background.
     if let Some(problem) = crate::util::cli_link_problem() {
-        log.log(&format!("warning: {problem} — keybindings using it can't fire; run start to repair"));
+        log.log(&format!(
+            "warning: {problem} — keybindings using it can't fire; run start to repair"
+        ));
         let _ = local
             .request(
                 "notification.show",
@@ -655,7 +707,9 @@ pub fn cmd_pause(env: &Env) {
     // sticky: mirrors stay, only the sync loop halts; resume with start
     set_paused(env, true);
     match running_pid(env) {
-        None => println!("mirror daemon already stopped; paused (won't autostart until you run start)"),
+        None => {
+            println!("mirror daemon already stopped; paused (won't autostart until you run start)")
+        }
         Some(pid) => {
             unsafe { libc::kill(pid, libc::SIGTERM) };
             println!("paused mirror daemon (pid {pid}); mirrors stay, resume with start");
@@ -681,20 +735,35 @@ pub fn cmd_status(env: &Env) -> Result<()> {
         Some(pid) => println!("daemon: running (pid {pid})"),
         None => println!(
             "daemon: not running{}",
-            if is_paused(env) { " (paused — resume with start)" } else { "" }
+            if is_paused(env) {
+                " (paused — resume with start)"
+            } else {
+                ""
+            }
         ),
     }
     match crate::util::cli_link_state() {
         crate::util::CliLink::Ok(t) => println!("cli link: ok (-> {})", t.display()),
         crate::util::CliLink::Missing => {
-            println!("cli link: MISSING ({}) — keybindings using it can't fire; start repairs it", crate::util::cli_link_path().display())
+            println!(
+                "cli link: MISSING ({}) — keybindings using it can't fire; start repairs it",
+                crate::util::cli_link_path().display()
+            )
         }
         crate::util::CliLink::Dangling(t) => {
-            println!("cli link: BROKEN (-> {}) — keybindings using it can't fire; start repairs it", t.display())
+            println!(
+                "cli link: BROKEN (-> {}) — keybindings using it can't fire; start repairs it",
+                t.display()
+            )
         }
-        crate::util::CliLink::Other(t) => println!("cli link: -> {} (not this binary; left alone)", t.display()),
+        crate::util::CliLink::Other(t) => {
+            println!("cli link: -> {} (not this binary; left alone)", t.display())
+        }
         crate::util::CliLink::File => {
-            println!("cli link: {} is a regular file (not managed)", crate::util::cli_link_path().display())
+            println!(
+                "cli link: {} is a regular file (not managed)",
+                crate::util::cli_link_path().display()
+            )
         }
     }
     let config = load_config(&env.config_search)?;
@@ -709,15 +778,28 @@ pub fn cmd_status(env: &Env) -> Result<()> {
     }
     for h in &config.hosts {
         let state = load_state(&env.state_dir, &h.name);
-        let ws = state.workspaces.values().filter(|w| !w.is_tombstoned()).count();
+        let ws = state
+            .workspaces
+            .values()
+            .filter(|w| !w.is_tombstoned())
+            .count();
         let panes = state.panes.values().filter(|p| !p.is_tombstoned()).count();
-        println!("host {} ({}): {ws} mirror workspaces, {panes} mirror panes", h.name, h.target);
+        println!(
+            "host {} ({}): {ws} mirror workspaces, {panes} mirror panes",
+            h.name, h.target
+        );
         let tombs: Vec<String> = state
             .workspaces
             .iter()
             .filter(|(_, e)| e.is_tombstoned())
             .map(|(rid, _)| format!("workspace {rid}"))
-            .chain(state.panes.iter().filter(|(_, e)| e.is_tombstoned()).map(|(rid, _)| format!("pane {rid}")))
+            .chain(
+                state
+                    .panes
+                    .iter()
+                    .filter(|(_, e)| e.is_tombstoned())
+                    .map(|(rid, _)| format!("pane {rid}")),
+            )
             .collect();
         if !tombs.is_empty() {
             println!("  closed mirrors (restorable): {}", tombs.join(", "));
@@ -726,7 +808,15 @@ pub fn cmd_status(env: &Env) -> Result<()> {
     let log_file = env.state_dir.join("daemon.log");
     if let Ok(text) = fs::read_to_string(&log_file) {
         println!("recent log:");
-        for l in text.trim_end().lines().rev().take(5).collect::<Vec<_>>().into_iter().rev() {
+        for l in text
+            .trim_end()
+            .lines()
+            .rev()
+            .take(5)
+            .collect::<Vec<_>>()
+            .into_iter()
+            .rev()
+        {
             println!("  {l}");
         }
     }
@@ -798,7 +888,9 @@ pub fn cmd_restore(env: &Env, filter_host: Option<&str>, filter_id: Option<&str>
             unsafe { libc::kill(pid, libc::SIGUSR1) };
             println!("restored {cleared} mirror(s) — daemon syncing now");
         }
-        None => println!("restored {cleared} mirror(s) — they will reappear when the daemon starts"),
+        None => {
+            println!("restored {cleared} mirror(s) — they will reappear when the daemon starts")
+        }
     }
     Ok(())
 }
@@ -832,12 +924,21 @@ mod tests {
         let mut streak = 0u32;
 
         // transient: fell back once, then the forward worked again
-        assert_eq!(remember_transport(Some(ApiTransport::Exec), &mut streak), None);
-        assert_eq!(remember_transport(Some(ApiTransport::Socket), &mut streak), Some(ApiTransport::Socket));
+        assert_eq!(
+            remember_transport(Some(ApiTransport::Exec), &mut streak),
+            None
+        );
+        assert_eq!(
+            remember_transport(Some(ApiTransport::Socket), &mut streak),
+            Some(ApiTransport::Socket)
+        );
         assert_eq!(streak, 0);
 
         // genuinely broken: two in a row sticks, and stays stuck
-        assert_eq!(remember_transport(Some(ApiTransport::Exec), &mut streak), None);
+        assert_eq!(
+            remember_transport(Some(ApiTransport::Exec), &mut streak),
+            None
+        );
         assert_eq!(
             remember_transport(Some(ApiTransport::Exec), &mut streak),
             Some(ApiTransport::Exec)
@@ -848,8 +949,14 @@ mod tests {
         );
 
         // a later success clears it, so a fixed host returns to the forward
-        assert_eq!(remember_transport(Some(ApiTransport::Socket), &mut streak), Some(ApiTransport::Socket));
-        assert_eq!(remember_transport(Some(ApiTransport::Exec), &mut streak), None);
+        assert_eq!(
+            remember_transport(Some(ApiTransport::Socket), &mut streak),
+            Some(ApiTransport::Socket)
+        );
+        assert_eq!(
+            remember_transport(Some(ApiTransport::Exec), &mut streak),
+            None
+        );
     }
 
     fn argv(parts: &[&str]) -> Vec<Value> {
@@ -870,7 +977,13 @@ mod tests {
         assert!(is_streamer_argv(&streamer));
 
         // the ssh child sharing the same pane is not itself a streamer
-        let ssh_child = argv(&["ssh", "-o", "BatchMode=yes", "vps", "exec ~/.local/bin/herdr ..."]);
+        let ssh_child = argv(&[
+            "ssh",
+            "-o",
+            "BatchMode=yes",
+            "vps",
+            "exec ~/.local/bin/herdr ...",
+        ]);
         assert!(!is_streamer_argv(&ssh_child));
     }
 
@@ -887,7 +1000,12 @@ mod tests {
             "/Users/n/proj",
         ])));
         // and a pre-v0.1.7 streamer, which carried no identity flag at all
-        assert!(is_streamer_argv(&argv(&["/usr/local/bin/herdr-mirror", "pane", "vps", "w1:p1"])));
+        assert!(is_streamer_argv(&argv(&[
+            "/usr/local/bin/herdr-mirror",
+            "pane",
+            "vps",
+            "w1:p1"
+        ])));
     }
 
     /// A shell left behind by session-restore is what healing must act on.
@@ -901,7 +1019,10 @@ mod tests {
     /// Another subcommand in the pane must not read as a live stream.
     #[test]
     fn other_subcommands_are_not_streamers() {
-        assert!(!is_streamer_argv(&argv(&["/usr/local/bin/herdr-mirror", "status"])));
+        assert!(!is_streamer_argv(&argv(&[
+            "/usr/local/bin/herdr-mirror",
+            "status"
+        ])));
         assert!(!is_streamer_argv(&argv(&["/usr/local/bin/herdr-mirror"])));
     }
 }

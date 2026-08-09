@@ -178,7 +178,10 @@ fn resolve_kind(name: &str, h: &RawHost) -> Result<(HostKind, String)> {
             if h.container.is_some() || h.folder.is_some() {
                 return Err(bad("container/folder need kind = \"docker\"".into()));
             }
-            let target = h.target.clone().ok_or_else(|| bad("missing target".into()))?;
+            let target = h
+                .target
+                .clone()
+                .ok_or_else(|| bad("missing target".into()))?;
             Ok((HostKind::Ssh, nonempty("target", &target)?))
         }
         "docker" => {
@@ -202,7 +205,9 @@ fn resolve_kind(name: &str, h: &RawHost) -> Result<(HostKind, String)> {
                 }
             }
         }
-        other => Err(bad(format!("unknown kind \"{other}\" (expected ssh or docker)"))),
+        other => Err(bad(format!(
+            "unknown kind \"{other}\" (expected ssh or docker)"
+        ))),
     }
 }
 
@@ -215,18 +220,22 @@ fn resolve_kind(name: &str, h: &RawHost) -> Result<(HostKind, String)> {
 /// command typed in a terminal. Searching every candidate either way keeps the
 /// two modes in agreement (see `util::config_candidates`).
 pub fn load_config(candidates: &[PathBuf]) -> Result<MirrorConfig> {
-    let found: Vec<PathBuf> =
-        candidates.iter().map(|d| d.join("hosts.toml")).filter(|f| f.is_file()).collect();
+    let found: Vec<PathBuf> = candidates
+        .iter()
+        .map(|d| d.join("hosts.toml"))
+        .filter(|f| f.is_file())
+        .collect();
     let Some(file) = found.first() else {
-        let searched =
-            candidates.iter().map(|d| format!("  {}", d.join("hosts.toml").display()));
+        let searched = candidates
+            .iter()
+            .map(|d| format!("  {}", d.join("hosts.toml").display()));
         return Err(err(format!(
             "no hosts.toml found — searched:\n{}\n\ncreate one with:\n\n[hosts.<name>]\ntarget = \"<ssh target>\"\n",
             searched.collect::<Vec<_>>().join("\n")
         )));
     };
-    let text = std::fs::read_to_string(file)
-        .map_err(|e| err(format!("{}: {e}", file.display())))?;
+    let text =
+        std::fs::read_to_string(file).map_err(|e| err(format!("{}: {e}", file.display())))?;
     let mut config = parse_config(&text).map_err(|e| err(format!("{}: {e}", file.display())))?;
     config.source = Some(file.clone());
     config.shadowed = found[1..].to_vec();
@@ -239,7 +248,9 @@ pub fn parse_config(text: &str) -> Result<MirrorConfig> {
     let mut hosts: Vec<HostConfig> = Vec::new();
     let mut warnings: Vec<String> = Vec::new();
     for (name, value) in raw.hosts {
-        let h: RawHost = value.try_into().map_err(|e| err(format!("[hosts.{name}]: {e}")))?;
+        let h: RawHost = value
+            .try_into()
+            .map_err(|e| err(format!("[hosts.{name}]: {e}")))?;
         if h.enabled == Some(false) {
             continue;
         }
@@ -287,12 +298,17 @@ pub fn parse_config(text: &str) -> Result<MirrorConfig> {
         return Err(err(if warnings.is_empty() {
             "hosts.toml: no enabled [hosts.*] entries".to_string()
         } else {
-            format!("hosts.toml: no usable [hosts.*] entries\n{}", warnings.join("\n"))
+            format!(
+                "hosts.toml: no usable [hosts.*] entries\n{}",
+                warnings.join("\n")
+            )
         }));
     }
     if let Some(d) = &raw.default_host {
         if !hosts.iter().any(|h| &h.name == d) {
-            return Err(err(format!("hosts.toml: default_host \"{d}\" is not an enabled [hosts.*] entry")));
+            return Err(err(format!(
+                "hosts.toml: default_host \"{d}\" is not an enabled [hosts.*] entry"
+            )));
         }
     }
     Ok(MirrorConfig {
@@ -362,7 +378,8 @@ mod tests {
     fn default_host_must_exist() {
         assert!(parse_config("default_host = \"nope\"\n[hosts.work]\ntarget = \"w\"\n").is_err());
         // unset default_host falls back to the first host declared
-        let c = parse_config("[hosts.zeta]\ntarget = \"z\"\n[hosts.alpha]\ntarget = \"a\"\n").unwrap();
+        let c =
+            parse_config("[hosts.zeta]\ntarget = \"z\"\n[hosts.alpha]\ntarget = \"a\"\n").unwrap();
         assert_eq!(c.default_host().unwrap().name, "zeta");
     }
 
@@ -375,7 +392,8 @@ mod tests {
     /// must survive parsing (a sorted map would put alpha first).
     #[test]
     fn preserves_declaration_order() {
-        let c = parse_config("[hosts.zeta]\ntarget = \"z\"\n[hosts.alpha]\ntarget = \"a\"\n").unwrap();
+        let c =
+            parse_config("[hosts.zeta]\ntarget = \"z\"\n[hosts.alpha]\ntarget = \"a\"\n").unwrap();
         assert_eq!(c.hosts[0].name, "zeta");
         assert_eq!(c.hosts[1].name, "alpha");
     }
@@ -392,7 +410,10 @@ mod tests {
     #[test]
     fn remote_bin_expr_configured_vs_auto() {
         assert_eq!(remote_bin_expr(Some("/opt/herdr")), "/opt/herdr");
-        assert_eq!(remote_bin_expr(Some("~/.local/bin/herdr")), "~/.local/bin/herdr");
+        assert_eq!(
+            remote_bin_expr(Some("~/.local/bin/herdr")),
+            "~/.local/bin/herdr"
+        );
         let auto = "sh -c 'exec \"$(command -v herdr 2>/dev/null || echo ~/.local/bin/herdr)\" \"$@\"' herdr";
         assert_eq!(remote_bin_expr(None), auto);
         assert_eq!(remote_bin_expr(Some("")), auto);
@@ -407,7 +428,10 @@ mod tests {
         .unwrap();
         let tok = c.hosts.iter().find(|h| h.name == "tok").unwrap();
         assert_eq!(tok.kind, HostKind::DockerFolder("/Users/n/proj".into()));
-        assert_eq!(tok.target, "/Users/n/proj", "display target falls back to the ref");
+        assert_eq!(
+            tok.target, "/Users/n/proj",
+            "display target falls back to the ref"
+        );
         assert!(tok.kind.is_docker());
         let named = c.hosts.iter().find(|h| h.name == "named").unwrap();
         assert_eq!(named.kind, HostKind::DockerContainer("crazy_ride".into()));
@@ -465,7 +489,11 @@ mod tests {
         .unwrap();
         assert_eq!(c.hosts.len(), 1);
         assert_eq!(c.hosts[0].name, "good");
-        assert!(c.warnings[0].contains("unknown api_transport"), "{:?}", c.warnings);
+        assert!(
+            c.warnings[0].contains("unknown api_transport"),
+            "{:?}",
+            c.warnings
+        );
     }
 
     #[test]
@@ -485,10 +513,8 @@ mod tests {
     /// single typo stopped every *other* host from mirroring.
     #[test]
     fn a_bad_host_is_skipped_not_fatal() {
-        let c = parse_config(
-            "[hosts.good]\ntarget = \"vps\"\n[hosts.bad]\ntarget = \"\"\n",
-        )
-        .expect("one bad host must not abort the load");
+        let c = parse_config("[hosts.good]\ntarget = \"vps\"\n[hosts.bad]\ntarget = \"\"\n")
+            .expect("one bad host must not abort the load");
         assert_eq!(c.hosts.len(), 1);
         assert_eq!(c.hosts[0].name, "good");
         assert_eq!(c.warnings.len(), 1, "the skip must be reported, not silent");
@@ -501,23 +527,33 @@ mod tests {
     /// nothing" when the user plainly did.
     #[test]
     fn all_hosts_invalid_is_still_an_error() {
-        let e = parse_config("[hosts.a]\ntarget = \"\"\n").unwrap_err().to_string();
+        let e = parse_config("[hosts.a]\ntarget = \"\"\n")
+            .unwrap_err()
+            .to_string();
         assert!(e.contains("no usable"), "{e}");
-        assert!(e.contains("target is empty"), "must name the actual reason: {e}");
+        assert!(
+            e.contains("target is empty"),
+            "must name the actual reason: {e}"
+        );
         // an empty file has no reasons to give, so it keeps the plain message
         let e = parse_config("").unwrap_err().to_string();
         assert!(!e.contains("no usable"), "{e}");
     }
 
     fn tmpdir(tag: &str) -> PathBuf {
-        let d = std::env::temp_dir().join(format!("herdr-mirror-cfgtest-{tag}-{}", std::process::id()));
+        let d =
+            std::env::temp_dir().join(format!("herdr-mirror-cfgtest-{tag}-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&d);
         std::fs::create_dir_all(&d).unwrap();
         d
     }
 
     fn write_hosts(dir: &Path, name: &str) {
-        std::fs::write(dir.join("hosts.toml"), format!("[hosts.{name}]\ntarget = \"t\"\n")).unwrap();
+        std::fs::write(
+            dir.join("hosts.toml"),
+            format!("[hosts.{name}]\ntarget = \"t\"\n"),
+        )
+        .unwrap();
     }
 
     /// A config in a *later* candidate must still be found. This is the
@@ -552,8 +588,16 @@ mod tests {
     fn missing_config_error_lists_every_candidate() {
         let a = tmpdir("miss-a");
         let b = tmpdir("miss-b");
-        let e = load_config(&[a.clone(), b.clone()]).unwrap_err().to_string();
-        assert!(e.contains(&a.join("hosts.toml").display().to_string()), "{e}");
-        assert!(e.contains(&b.join("hosts.toml").display().to_string()), "{e}");
+        let e = load_config(&[a.clone(), b.clone()])
+            .unwrap_err()
+            .to_string();
+        assert!(
+            e.contains(&a.join("hosts.toml").display().to_string()),
+            "{e}"
+        );
+        assert!(
+            e.contains(&b.join("hosts.toml").display().to_string()),
+            "{e}"
+        );
     }
 }
